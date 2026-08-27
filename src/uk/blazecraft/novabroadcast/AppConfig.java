@@ -13,7 +13,10 @@ record AppConfig(
         int targetPort,
         String targetName,
         boolean sessionEnabled,
-        boolean netherNetEnabled) {
+        boolean netherNetEnabled,
+        String sessionScid,
+        String sessionTemplate,
+        String sessionName) {
 
     static AppConfig load(Path path) throws IOException {
         if (!Files.exists(path)) {
@@ -32,7 +35,10 @@ record AppConfig(
                 Integer.parseInt(p.getProperty("target.port", "19132").trim()),
                 p.getProperty("target.name", "NovaCraft").trim(),
                 Boolean.parseBoolean(p.getProperty("session.enabled", "false")),
-                Boolean.parseBoolean(p.getProperty("nethernet.enabled", "false"))
+                Boolean.parseBoolean(p.getProperty("nethernet.enabled", "false")),
+                p.getProperty("session.scid", "").trim(),
+                p.getProperty("session.template", "").trim(),
+                p.getProperty("session.name", "NovaBroadcast").trim()
         );
     }
 }
@@ -47,7 +53,15 @@ xbox.relyingParty=http://xboxlive.com
 target.host=54.37.245.44
 target.port=19133
 target.name=NovaCraft
+
+# Xbox Multiplayer Session Directory (MPSD)
+# Leave disabled until you have title-authorized SCID/template values.
 session.enabled=false
+session.scid=
+session.template=
+session.name=NovaBroadcast
+
+# NetherNet/WebRTC remains a separate milestone.
 nethernet.enabled=false
 """;
     private DefaultConfig() {}
