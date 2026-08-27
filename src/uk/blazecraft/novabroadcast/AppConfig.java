@@ -24,7 +24,9 @@ record AppConfig(
         int netherNetMaxSctpMessageSize,
         String netherNetStunUrl,
         int netherNetIceMinPort,
-        int netherNetIceMaxPort) {
+        int netherNetIceMaxPort,
+        String netherNetIdentityKey,
+        String netherNetIdentityDomain) {
 
     static AppConfig load(Path path) throws IOException {
         if (!Files.exists(path)) {
@@ -61,7 +63,9 @@ record AppConfig(
                 parsePositive(p, "nethernet.maxSctpMessageSize", 262_144),
                 p.getProperty("nethernet.stunUrl", "stun:stun.l.google.com:19302").trim(),
                 iceMinPort,
-                iceMaxPort
+                iceMaxPort,
+                p.getProperty("nethernet.identityKey", "data/nethernet-identity.key").trim(),
+                p.getProperty("nethernet.identityDomain", "self").trim()
         );
     }
 
@@ -110,6 +114,10 @@ nethernet.listenHost=0.0.0.0
 nethernet.listenPort=19134
 nethernet.maxSdpBytes=1048576
 nethernet.maxSctpMessageSize=262144
+
+# Long-lived operator identity. Keep this private key stable across restarts.
+nethernet.identityKey=data/nethernet-identity.key
+nethernet.identityDomain=self
 
 # STUN helps a container/NAT host advertise a reachable server-reflexive candidate.
 # Set blank to use host candidates only.
