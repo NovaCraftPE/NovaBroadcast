@@ -11,11 +11,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.*;
 
-/**
- * Clean-room answering-side WebRTC backend using the general-purpose
- * dev.onvoid webrtc-java JNI wrapper. No broadcaster-specific implementation
- * code or constants are used here.
- */
+/** Clean-room answering-side native WebRTC backend. */
 final class WebRtcPeerBackend implements NetherNetSignalingServer.PeerBackend, AutoCloseable {
     private static final Duration SDP_TIMEOUT = Duration.ofSeconds(15);
     private static final Duration ICE_TIMEOUT = Duration.ofSeconds(20);
@@ -24,24 +20,28 @@ final class WebRtcPeerBackend implements NetherNetSignalingServer.PeerBackend, A
     private final AudioDeviceModule audioModule;
     private final PeerConnectionFactory factory;
     private final NetherNetIdentity identity;
+    private final ClientIdentityVerifier clientVerifier;
     private final Map<String, Peer> peers = new ConcurrentHashMap<>();
     private volatile boolean closed;
 
     WebRtcPeerBackend(AppConfig config) throws Exception {
         this.config = Objects.requireNonNull(config);
-        // NovaBroadcast carries data channels only. Using WebRTC's dummy audio
-        // layer avoids opening PulseAudio/ALSA devices on headless servers.
         this.audioModule = new AudioDeviceModule(AudioLayer.kDummyAudio);
         this.factory = new PeerConnectionFactory(audioModule);
         this.identity = NetherNetIdentity.loadOrCreate(
                 Path.of(config.netherNetIdentityKey()), config.netherNetIdentityDomain());
+        this.clientVerifier = config.netherNetClientJwksUrl().isBlank()
+                ? null : new ClientIdentityVerifier(config.netherNetClientJwksUrl());
+        if (config.netherNetRequireClientIdentity() && clientVerifier == null) {
+            throw new IllegalStateException(
+                    "nethernet.requireClientIdentity=true requires nethernet.clientJwksUrl");
+        }
         System.out.println("[NetherNet] Operator identity: " + identity.publicKeyFingerprint());
+        System.out.println("[NetherNet] Client identity verification: " +
+                (clientVerifier == null ? "disabled" : "enabled"));
     }
 
-    @Override
-    public boolean ready() {
-        return !closed;
-    }
+    @Override public boolean ready() { return !closed; }
 
     @Override
     public String answer(String networkId, String offerSdp) throws Exception {
@@ -49,12 +49,15 @@ final class WebRtcPeerBackend implements NetherNetSignalingServer.PeerBackend, A
         Objects.requireNonNull(networkId, "networkId");
         Objects.requireNonNull(offerSdp, "offerSdp");
 
+        NetherNetIdentity.Offer offer = NetherNetIdentity.stripClientIdentity(offerSdp);
+        authenticateClient(networkId, offerSdp, offer);
+
+        // Authentication happens before allocating ICE/DTLS/SCTP state.
         Peer replacement = new Peer(networkId);
         Peer old = peers.put(networkId, replacement);
         if (old != null) old.close();
-
         try {
-            return replacement.answer(offerSdp);
+            return replacement.answer(offer.cleanSdp());
         } catch (Exception e) {
             peers.remove(networkId, replacement);
             replacement.close();
@@ -62,15 +65,30 @@ final class WebRtcPeerBackend implements NetherNetSignalingServer.PeerBackend, A
         }
     }
 
-    void sendReliable(String networkId, byte[] applicationPayload) throws Exception {
-        Peer peer = requirePeer(networkId);
-        peer.sendReliable(applicationPayload);
+    private void authenticateClient(String networkId, String originalOffer,
+                                    NetherNetIdentity.Offer offer) throws Exception {
+        if (!offer.hasIdentity()) {
+            if (config.netherNetRequireClientIdentity()) {
+                throw new SecurityException("Client identity is required");
+            }
+            System.out.println("[NetherNet] Unauthenticated client offer for NetworkID " + networkId);
+            return;
+        }
+        if (clientVerifier == null) {
+            if (config.netherNetRequireClientIdentity()) {
+                throw new SecurityException("Client identity cannot be verified without configured JWKS");
+            }
+            System.out.println("[NetherNet] Client assertion present but verification disabled for NetworkID " + networkId);
+            return;
+        }
+        ClientIdentityVerifier.VerifiedClient client = clientVerifier.verify(originalOffer, offer.encodedIdentity());
+        System.out.println("[NetherNet] Verified client NetworkID=" + networkId +
+                (client.xuid().isBlank() ? "" : " XUID=" + client.xuid()) +
+                (client.uuid().isBlank() ? "" : " UUID=" + client.uuid()));
     }
 
-    boolean sendUnreliable(String networkId, byte[] applicationPayload) throws Exception {
-        Peer peer = requirePeer(networkId);
-        return peer.sendUnreliable(applicationPayload);
-    }
+    void sendReliable(String networkId, byte[] payload) throws Exception { requirePeer(networkId).sendReliable(payload); }
+    boolean sendUnreliable(String networkId, byte[] payload) throws Exception { return requirePeer(networkId).sendUnreliable(payload); }
 
     private Peer requirePeer(String networkId) {
         Peer peer = peers.get(networkId);
@@ -78,8 +96,7 @@ final class WebRtcPeerBackend implements NetherNetSignalingServer.PeerBackend, A
         return peer;
     }
 
-    @Override
-    public void close() {
+    @Override public void close() {
         if (closed) return;
         closed = true;
         peers.values().forEach(Peer::close);
@@ -104,8 +121,7 @@ final class WebRtcPeerBackend implements NetherNetSignalingServer.PeerBackend, A
     private final class Peer implements AutoCloseable {
         private final String networkId;
         private final CompletableFuture<Void> iceComplete = new CompletableFuture<>();
-        private final NetherNetFraming.ReliableReassembler reliableReassembler =
-                new NetherNetFraming.ReliableReassembler();
+        private final NetherNetFraming.ReliableReassembler reliableReassembler = new NetherNetFraming.ReliableReassembler();
         private final RTCPeerConnection connection;
         private volatile RTCDataChannel reliable;
         private volatile RTCDataChannel unreliable;
@@ -117,32 +133,17 @@ final class WebRtcPeerBackend implements NetherNetSignalingServer.PeerBackend, A
             if (connection == null) throw new IllegalStateException("WebRTC peer creation returned null");
         }
 
-        String answer(String offerSdp) throws Exception {
-            NetherNetIdentity.Offer offer = NetherNetIdentity.stripClientIdentity(offerSdp);
-            if (offer.hasIdentity()) {
-                System.out.println("[NetherNet] Client identity assertion present for NetworkID " + networkId +
-                        " (cryptographic client-token validation is not enabled yet)");
-            } else {
-                System.out.println("[NetherNet] Client offer has no identity assertion for NetworkID " + networkId);
-            }
-
-            // Mojang requires a=identity to be removed before handing the SDP to
-            // the underlying WebRTC implementation.
-            await(setRemote(new RTCSessionDescription(RTCSdpType.OFFER, offer.cleanSdp())), SDP_TIMEOUT,
-                    "set remote SDP");
-
+        String answer(String cleanOfferSdp) throws Exception {
+            await(setRemote(new RTCSessionDescription(RTCSdpType.OFFER, cleanOfferSdp)), SDP_TIMEOUT, "set remote SDP");
             RTCSessionDescription answer = await(createAnswer(), SDP_TIMEOUT, "create SDP answer");
             await(setLocal(answer), SDP_TIMEOUT, "set local SDP");
-
             if (connection.getIceGatheringState() != RTCIceGatheringState.COMPLETE) {
                 await(iceComplete, ICE_TIMEOUT, "ICE candidate gathering");
             }
-
             RTCSessionDescription local = connection.getLocalDescription();
             if (local == null || local.sdp == null || local.sdp.isBlank()) {
                 throw new IllegalStateException("WebRTC produced no local SDP answer");
             }
-
             String signedAnswer = identity.signAnswer(local.sdp);
             System.out.println("[NetherNet] Signed SDP answer ready for NetworkID " + networkId);
             return signedAnswer;
@@ -167,19 +168,15 @@ final class WebRtcPeerBackend implements NetherNetSignalingServer.PeerBackend, A
 
         private RTCDataChannel requireOpenChannel(RTCDataChannel channel, String label) {
             if (channel == null) throw new IllegalStateException(label + " has not been received yet");
-            if (channel.getState() != RTCDataChannelState.OPEN) {
-                throw new IllegalStateException(label + " is not open: " + channel.getState());
-            }
+            if (channel.getState() != RTCDataChannelState.OPEN) throw new IllegalStateException(label + " is not open: " + channel.getState());
             return channel;
         }
 
         private CompletableFuture<RTCSessionDescription> createAnswer() {
             CompletableFuture<RTCSessionDescription> result = new CompletableFuture<>();
             connection.createAnswer(new RTCAnswerOptions(), new CreateSessionDescriptionObserver() {
-                @Override public void onSuccess(RTCSessionDescription description) { result.complete(description); }
-                @Override public void onFailure(String error) {
-                    result.completeExceptionally(new IllegalStateException("createAnswer failed: " + error));
-                }
+                @Override public void onSuccess(RTCSessionDescription d) { result.complete(d); }
+                @Override public void onFailure(String error) { result.completeExceptionally(new IllegalStateException("createAnswer failed: " + error)); }
             });
             return result;
         }
@@ -189,52 +186,33 @@ final class WebRtcPeerBackend implements NetherNetSignalingServer.PeerBackend, A
             connection.setRemoteDescription(sdp, setObserver(result, "setRemoteDescription"));
             return result;
         }
-
         private CompletableFuture<Void> setLocal(RTCSessionDescription sdp) {
             CompletableFuture<Void> result = new CompletableFuture<>();
             connection.setLocalDescription(sdp, setObserver(result, "setLocalDescription"));
             return result;
         }
-
         private SetSessionDescriptionObserver setObserver(CompletableFuture<Void> future, String action) {
             return new SetSessionDescriptionObserver() {
                 @Override public void onSuccess() { future.complete(null); }
-                @Override public void onFailure(String error) {
-                    future.completeExceptionally(new IllegalStateException(action + " failed: " + error));
-                }
+                @Override public void onFailure(String error) { future.completeExceptionally(new IllegalStateException(action + " failed: " + error)); }
             };
         }
 
         private void attach(RTCDataChannel channel) {
             String label = channel.getLabel();
-            if (NetherNetTransport.RELIABLE_CHANNEL.equals(label)) {
-                reliable = channel;
-            } else if (NetherNetTransport.UNRELIABLE_CHANNEL.equals(label)) {
-                unreliable = channel;
-            } else {
-                System.out.println("[NetherNet] Ignoring unexpected data channel: " + label);
-                channel.close();
-                channel.dispose();
-                return;
-            }
-
+            if (NetherNetTransport.RELIABLE_CHANNEL.equals(label)) reliable = channel;
+            else if (NetherNetTransport.UNRELIABLE_CHANNEL.equals(label)) unreliable = channel;
+            else { channel.close(); channel.dispose(); return; }
             channel.registerObserver(new RTCDataChannelObserver() {
                 @Override public void onBufferedAmountChange(long previousAmount) {}
-
-                @Override public void onStateChange() {
-                    System.out.println("[NetherNet] " + networkId + " " + label + " -> " + channel.getState());
-                }
-
+                @Override public void onStateChange() { System.out.println("[NetherNet] " + networkId + " " + label + " -> " + channel.getState()); }
                 @Override public void onMessage(RTCDataChannelBuffer buffer) {
                     ByteBuffer source = buffer.data.duplicate();
-                    byte[] frame = new byte[source.remaining()];
-                    source.get(frame);
+                    byte[] frame = new byte[source.remaining()]; source.get(frame);
                     try {
-                        if (NetherNetTransport.RELIABLE_CHANNEL.equals(label)) {
+                        if (NetherNetTransport.RELIABLE_CHANNEL.equals(label))
                             reliableReassembler.accept(frame).ifPresent(payload -> onBedrockPayload(true, payload));
-                        } else {
-                            onBedrockPayload(false, NetherNetFraming.stripUnreliable(frame));
-                        }
+                        else onBedrockPayload(false, NetherNetFraming.stripUnreliable(frame));
                     } catch (RuntimeException e) {
                         System.err.println("[NetherNet] Invalid " + label + " frame from " + networkId + ": " + e.getMessage());
                     }
@@ -247,66 +225,39 @@ final class WebRtcPeerBackend implements NetherNetSignalingServer.PeerBackend, A
             String lane = reliableChannel ? "reliable" : "unreliable";
             var inspection = BedrockWireInspector.inspect(payload);
             if (inspection.isPresent()) {
-                BedrockWireInspector.Inspection value = inspection.get();
-                BedrockWireInspector.PacketHeader header = value.header();
-                System.out.println("[Bedrock] " + networkId + " " + lane +
-                        " shape=" + value.shape() +
-                        " packetId=" + header.packetId() +
-                        " senderSubClient=" + header.senderSubClientId() +
-                        " targetSubClient=" + header.targetSubClientId() +
-                        " bytes=" + payload.length);
-            } else {
-                System.out.println("[Bedrock] " + networkId + " " + lane +
-                        " unrecognized/enveloped payload bytes=" + payload.length);
-            }
+                var value = inspection.get(); var header = value.header();
+                System.out.println("[Bedrock] " + networkId + " " + lane + " shape=" + value.shape() +
+                        " packetId=" + header.packetId() + " senderSubClient=" + header.senderSubClientId() +
+                        " targetSubClient=" + header.targetSubClientId() + " bytes=" + payload.length);
+            } else System.out.println("[Bedrock] " + networkId + " " + lane + " unrecognized/enveloped payload bytes=" + payload.length);
         }
 
-        @Override
-        public void close() {
-            if (peerClosed) return;
-            peerClosed = true;
-            closeChannel(reliable);
-            closeChannel(unreliable);
-            connection.close();
+        @Override public void close() {
+            if (peerClosed) return; peerClosed = true;
+            closeChannel(reliable); closeChannel(unreliable); connection.close();
         }
-
         private void closeChannel(RTCDataChannel channel) {
             if (channel == null) return;
             try { channel.unregisterObserver(); } catch (Exception ignored) {}
             try { channel.close(); } catch (Exception ignored) {}
             try { channel.dispose(); } catch (Exception ignored) {}
         }
-
         private final class Observer implements PeerConnectionObserver {
-            @Override public void onIceCandidate(RTCIceCandidate candidate) {
-                // Non-trickle HTTP signaling: candidates are returned in the final local SDP.
-            }
-
-            @Override public void onIceGatheringChange(RTCIceGatheringState state) {
-                if (state == RTCIceGatheringState.COMPLETE) iceComplete.complete(null);
-            }
-
+            @Override public void onIceCandidate(RTCIceCandidate candidate) {}
+            @Override public void onIceGatheringChange(RTCIceGatheringState state) { if (state == RTCIceGatheringState.COMPLETE) iceComplete.complete(null); }
             @Override public void onConnectionChange(RTCPeerConnectionState state) {
                 System.out.println("[NetherNet] " + networkId + " peer -> " + state);
-                if (state == RTCPeerConnectionState.FAILED || state == RTCPeerConnectionState.CLOSED) {
-                    peers.remove(networkId, Peer.this);
-                }
+                if (state == RTCPeerConnectionState.FAILED || state == RTCPeerConnectionState.CLOSED) peers.remove(networkId, Peer.this);
             }
-
-            @Override public void onDataChannel(RTCDataChannel dataChannel) {
-                attach(dataChannel);
-            }
+            @Override public void onDataChannel(RTCDataChannel dataChannel) { attach(dataChannel); }
         }
     }
 
     private static <T> T await(CompletableFuture<T> future, Duration timeout, String action) throws Exception {
-        try {
-            return future.get(timeout.toMillis(), TimeUnit.MILLISECONDS);
-        } catch (TimeoutException e) {
-            throw new IllegalStateException(action + " timed out after " + timeout.toSeconds() + " seconds", e);
-        } catch (ExecutionException e) {
-            Throwable cause = e.getCause();
-            if (cause instanceof Exception exception) throw exception;
+        try { return future.get(timeout.toMillis(), TimeUnit.MILLISECONDS); }
+        catch (TimeoutException e) { throw new IllegalStateException(action + " timed out after " + timeout.toSeconds() + " seconds", e); }
+        catch (ExecutionException e) {
+            Throwable cause = e.getCause(); if (cause instanceof Exception exception) throw exception;
             throw new IllegalStateException(action + " failed", cause);
         }
     }
