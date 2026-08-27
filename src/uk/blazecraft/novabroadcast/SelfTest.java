@@ -14,6 +14,8 @@ final class SelfTest {
         testUnreliable();
         testOutOfOrderRejected();
         testTransferPacket2168();
+        testDirectWireInspection();
+        testLengthPrefixedWireInspection();
         System.out.println("[SelfTest] All tests passed.");
     }
 
@@ -84,6 +86,29 @@ final class SelfTest {
                 0x00
         };
         require(Arrays.equals(expected, encoded), "protocol 2168 TransferPacket bytes mismatch");
+    }
+
+    private static void testDirectWireInspection() {
+        byte[] transfer = BedrockTransferEncoder.encodePacket(2168, "127.0.0.1", 19132, false);
+        BedrockWireInspector.Inspection inspection = BedrockWireInspector.inspect(transfer).orElseThrow();
+        require(inspection.shape() == BedrockWireInspector.Shape.DIRECT_PACKET, "expected direct packet shape");
+        require(inspection.header().packetId() == 85, "expected TransferPacket ID 85");
+        require(inspection.header().senderSubClientId() == 0, "expected sender sub-client 0");
+        require(inspection.header().targetSubClientId() == 0, "expected target sub-client 0");
+    }
+
+    private static void testLengthPrefixedWireInspection() {
+        byte[] packet = BedrockTransferEncoder.encodePacket(2168, "127.0.0.1", 19132, false);
+        byte[] payload = new byte[packet.length + 1];
+        require(packet.length < 128, "test packet unexpectedly requires multi-byte length");
+        payload[0] = (byte) packet.length;
+        System.arraycopy(packet, 0, payload, 1, packet.length);
+
+        BedrockWireInspector.Inspection inspection = BedrockWireInspector.inspect(payload).orElseThrow();
+        require(inspection.shape() == BedrockWireInspector.Shape.LENGTH_PREFIXED_PACKET,
+                "expected length-prefixed packet shape");
+        require(inspection.packetLength() == packet.length, "length-prefixed packet size mismatch");
+        require(inspection.header().packetId() == 85, "expected nested TransferPacket ID 85");
     }
 
     private static void require(boolean condition, String message) {
