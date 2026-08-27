@@ -1,5 +1,7 @@
 package uk.blazecraft.novabroadcast;
 
+import dev.onvoid.webrtc.PeerConnectionFactory;
+
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 
@@ -10,6 +12,16 @@ final class SelfTest {
         testUnreliable();
         testOutOfOrderRejected();
         System.out.println("[SelfTest] All tests passed.");
+    }
+
+    static void runNativeWebRtc() {
+        PeerConnectionFactory factory = new PeerConnectionFactory();
+        try {
+            System.out.println("[SelfTest] Native WebRTC factory initialized.");
+        } finally {
+            factory.dispose();
+        }
+        System.out.println("[SelfTest] Native WebRTC smoke test passed.");
     }
 
     private static void testUnfragmentedReliable() {
