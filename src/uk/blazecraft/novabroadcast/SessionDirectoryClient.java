@@ -2,15 +2,16 @@ package uk.blazecraft.novabroadcast;
 
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * Clean-room Xbox Multiplayer Session Directory boundary.
+ * Clean-room Xbox Multiplayer Session Directory client.
  *
- * This milestone deliberately stops before writing a Minecraft session. It
- * validates the configured, title-authorized SCID/template against MPSD and
- * only then reports that the application is ready for the session-document
- * implementation. No Minecraft Retail identifiers are embedded here.
+ * Title-specific Minecraft constants/custom properties and NetherNet network
+ * identity are intentionally not embedded here. Until those are implemented,
+ * NovaBroadcast can validate and render the base session write but refuses to
+ * publish a misleading joinable session.
  */
 final class SessionDirectoryClient {
     private static final String MPSD = "https://sessiondirectory.xboxlive.com";
@@ -29,13 +30,42 @@ final class SessionDirectoryClient {
         System.out.println("[Session] MPSD template is reachable with the authenticated account.");
         System.out.println("[Session] Session URI: " + sessionUri(config));
 
-        if (config.netherNetEnabled()) {
-            throw new UnsupportedOperationException(
-                    "NetherNet/WebRTC transport is not implemented yet. " +
-                    "Disable nethernet.enabled until the transport milestone is complete.");
+        String document = SessionDocument.activeMember(identity);
+        System.out.println("[Session] Base session document: " + document);
+
+        if (!config.sessionWriteEnabled()) {
+            System.out.println("[Session] Dry-run complete. session.writeEnabled=false, so no MPSD session was written.");
+            return;
         }
 
-        System.out.println("[Session] Session writes remain disabled until the Minecraft session document is implemented.");
+        if (!config.netherNetEnabled()) {
+            throw new UnsupportedOperationException(
+                    "Live MPSD writes are blocked until NetherNet is enabled and its Minecraft session fields are implemented. " +
+                    "This prevents NovaBroadcast from advertising an unreachable session.");
+        }
+
+        throw new UnsupportedOperationException(
+                "NetherNet/WebRTC transport is not implemented yet; refusing to publish the session.");
+    }
+
+    /**
+     * Lifecycle primitive for the later transport milestone. Creates a new
+     * session only; If-None-Match prevents accidentally replacing an existing
+     * session with the same name.
+     */
+    Http.Response create(AppConfig config, String document) throws Exception {
+        Map<String,String> h = writeHeaders();
+        h.put("If-None-Match", "*");
+        return Http.put(sessionUri(config), document, h);
+    }
+
+    Http.Response read(AppConfig config) throws Exception {
+        return Http.get(sessionUri(config), headers());
+    }
+
+    /** Remove the authenticated caller from the session. */
+    Http.Response leave(AppConfig config) throws Exception {
+        return Http.delete(sessionUri(config) + "/members/me", headers());
     }
 
     private void validateTemplate(AppConfig config) throws Exception {
@@ -50,11 +80,17 @@ final class SessionDirectoryClient {
     }
 
     private Map<String,String> headers() {
-        return Map.of(
-                "Authorization", identity.authorizationHeader(),
-                "Accept", "application/json",
-                "x-xbl-contract-version", "107"
-        );
+        Map<String,String> h = new LinkedHashMap<>();
+        h.put("Authorization", identity.authorizationHeader());
+        h.put("Accept", "application/json");
+        h.put("x-xbl-contract-version", "107");
+        return h;
+    }
+
+    private Map<String,String> writeHeaders() {
+        Map<String,String> h = new LinkedHashMap<>(headers());
+        h.put("Content-Type", "application/json");
+        return h;
     }
 
     private static void requireConfigured(AppConfig config) {
