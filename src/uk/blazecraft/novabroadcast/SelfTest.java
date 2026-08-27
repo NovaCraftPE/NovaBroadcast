@@ -13,6 +13,7 @@ final class SelfTest {
         testFragmentedReliable();
         testUnreliable();
         testOutOfOrderRejected();
+        testTransferPacket2168();
         System.out.println("[SelfTest] All tests passed.");
     }
 
@@ -70,6 +71,19 @@ final class SelfTest {
             rejected = true;
         }
         require(rejected, "out-of-order fragment must be rejected");
+    }
+
+    private static void testTransferPacket2168() {
+        byte[] encoded = BedrockTransferEncoder.encodePacket(2168, "127.0.0.1", 19132, false);
+        byte[] expected = new byte[] {
+                0x55,
+                0x09,
+                '1','2','7','.','0','.','0','.','1',
+                (byte) 0xbc, 0x4a,
+                0x00,
+                0x00
+        };
+        require(Arrays.equals(expected, encoded), "protocol 2168 TransferPacket bytes mismatch");
     }
 
     private static void require(boolean condition, String message) {
