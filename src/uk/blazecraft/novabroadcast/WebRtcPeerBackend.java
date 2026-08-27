@@ -5,6 +5,7 @@ import dev.onvoid.webrtc.media.audio.AudioDeviceModule;
 import dev.onvoid.webrtc.media.audio.AudioLayer;
 
 import java.nio.ByteBuffer;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Map;
 import java.util.Objects;
@@ -22,15 +23,19 @@ final class WebRtcPeerBackend implements NetherNetSignalingServer.PeerBackend, A
     private final AppConfig config;
     private final AudioDeviceModule audioModule;
     private final PeerConnectionFactory factory;
+    private final NetherNetIdentity identity;
     private final Map<String, Peer> peers = new ConcurrentHashMap<>();
     private volatile boolean closed;
 
-    WebRtcPeerBackend(AppConfig config) {
+    WebRtcPeerBackend(AppConfig config) throws Exception {
         this.config = Objects.requireNonNull(config);
         // NovaBroadcast carries data channels only. Using WebRTC's dummy audio
         // layer avoids opening PulseAudio/ALSA devices on headless servers.
         this.audioModule = new AudioDeviceModule(AudioLayer.kDummyAudio);
         this.factory = new PeerConnectionFactory(audioModule);
+        this.identity = NetherNetIdentity.loadOrCreate(
+                Path.of(config.netherNetIdentityKey()), config.netherNetIdentityDomain());
+        System.out.println("[NetherNet] Operator identity: " + identity.publicKeyFingerprint());
     }
 
     @Override
@@ -113,7 +118,17 @@ final class WebRtcPeerBackend implements NetherNetSignalingServer.PeerBackend, A
         }
 
         String answer(String offerSdp) throws Exception {
-            await(setRemote(new RTCSessionDescription(RTCSdpType.OFFER, offerSdp)), SDP_TIMEOUT,
+            NetherNetIdentity.Offer offer = NetherNetIdentity.stripClientIdentity(offerSdp);
+            if (offer.hasIdentity()) {
+                System.out.println("[NetherNet] Client identity assertion present for NetworkID " + networkId +
+                        " (cryptographic client-token validation is not enabled yet)");
+            } else {
+                System.out.println("[NetherNet] Client offer has no identity assertion for NetworkID " + networkId);
+            }
+
+            // Mojang requires a=identity to be removed before handing the SDP to
+            // the underlying WebRTC implementation.
+            await(setRemote(new RTCSessionDescription(RTCSdpType.OFFER, offer.cleanSdp())), SDP_TIMEOUT,
                     "set remote SDP");
 
             RTCSessionDescription answer = await(createAnswer(), SDP_TIMEOUT, "create SDP answer");
@@ -127,8 +142,10 @@ final class WebRtcPeerBackend implements NetherNetSignalingServer.PeerBackend, A
             if (local == null || local.sdp == null || local.sdp.isBlank()) {
                 throw new IllegalStateException("WebRTC produced no local SDP answer");
             }
-            System.out.println("[NetherNet] SDP answer ready for NetworkID " + networkId);
-            return local.sdp;
+
+            String signedAnswer = identity.signAnswer(local.sdp);
+            System.out.println("[NetherNet] Signed SDP answer ready for NetworkID " + networkId);
+            return signedAnswer;
         }
 
         void sendReliable(byte[] payload) throws Exception {
