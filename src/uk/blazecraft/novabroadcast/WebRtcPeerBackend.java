@@ -20,7 +20,7 @@ final class WebRtcPeerBackend implements NetherNetSignalingServer.PeerBackend, A
     private final AudioDeviceModule audioModule;
     private final PeerConnectionFactory factory;
     private final NetherNetIdentity identity;
-    private final ClientIdentityVerifier clientVerifier;
+    private final MinecraftClientIdentityVerifier clientVerifier;
     private final Map<String, Peer> peers = new ConcurrentHashMap<>();
     private volatile boolean closed;
 
@@ -30,15 +30,13 @@ final class WebRtcPeerBackend implements NetherNetSignalingServer.PeerBackend, A
         this.factory = new PeerConnectionFactory(audioModule);
         this.identity = NetherNetIdentity.loadOrCreate(
                 Path.of(config.netherNetIdentityKey()), config.netherNetIdentityDomain());
-        this.clientVerifier = config.netherNetClientJwksUrl().isBlank()
-                ? null : new ClientIdentityVerifier(config.netherNetClientJwksUrl());
-        if (config.netherNetRequireClientIdentity() && clientVerifier == null) {
-            throw new IllegalStateException(
-                    "nethernet.requireClientIdentity=true requires nethernet.clientJwksUrl");
-        }
+        this.clientVerifier = new MinecraftClientIdentityVerifier(
+                config.netherNetClientIssuer(),
+                config.netherNetClientAudience(),
+                config.netherNetClientJwksUrl());
         System.out.println("[NetherNet] Operator identity: " + identity.publicKeyFingerprint());
-        System.out.println("[NetherNet] Client identity verification: " +
-                (clientVerifier == null ? "disabled" : "enabled"));
+        System.out.println("[NetherNet] Client identity policy: " +
+                (config.netherNetRequireClientIdentity() ? "required" : "verify-if-present"));
     }
 
     @Override public boolean ready() { return !closed; }
@@ -74,17 +72,25 @@ final class WebRtcPeerBackend implements NetherNetSignalingServer.PeerBackend, A
             System.out.println("[NetherNet] Unauthenticated client offer for NetworkID " + networkId);
             return;
         }
-        if (clientVerifier == null) {
-            if (config.netherNetRequireClientIdentity()) {
-                throw new SecurityException("Client identity cannot be verified without configured JWKS");
-            }
-            System.out.println("[NetherNet] Client assertion present but verification disabled for NetworkID " + networkId);
-            return;
-        }
+
         ClientIdentityVerifier.VerifiedClient client = clientVerifier.verify(originalOffer, offer.encodedIdentity());
-        System.out.println("[NetherNet] Verified client NetworkID=" + networkId +
-                (client.xuid().isBlank() ? "" : " XUID=" + client.xuid()) +
-                (client.uuid().isBlank() ? "" : " UUID=" + client.uuid()));
+        String xuid = firstNonBlank(client.xuid(), claim(client, "xid"));
+        String uuid = firstNonBlank(client.uuid(), claim(client, "mid"), claim(client, "sub"));
+        String name = claim(client, "xname");
+        System.out.println("[NetherNet] Verified Minecraft client NetworkID=" + networkId +
+                (xuid.isBlank() ? "" : " XUID=" + xuid) +
+                (name.isBlank() ? "" : " Name=" + name) +
+                (uuid.isBlank() ? "" : " Identity=" + uuid));
+    }
+
+    private static String claim(ClientIdentityVerifier.VerifiedClient client, String key) {
+        Object value = client.claims().get(key);
+        return value == null ? "" : String.valueOf(value);
+    }
+
+    private static String firstNonBlank(String... values) {
+        for (String value : values) if (value != null && !value.isBlank()) return value;
+        return "";
     }
 
     void sendReliable(String networkId, byte[] payload) throws Exception { requirePeer(networkId).sendReliable(payload); }
