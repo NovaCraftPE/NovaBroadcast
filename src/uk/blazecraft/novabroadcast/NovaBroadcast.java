@@ -11,6 +11,10 @@ public final class NovaBroadcast {
             SelfTest.run();
             return;
         }
+        if (Arrays.asList(args).contains("--webrtc-smoke-test")) {
+            SelfTest.runNativeWebRtc();
+            return;
+        }
 
         System.out.println("NovaBroadcast " + VERSION);
         System.out.println("Independent Java implementation - no MCXboxBroadcast runtime/source dependency.");
