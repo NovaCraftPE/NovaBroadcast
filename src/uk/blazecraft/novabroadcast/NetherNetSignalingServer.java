@@ -65,7 +65,8 @@ final class NetherNetSignalingServer implements AutoCloseable {
             Request request = Request.read(in, maxSdpBytes);
 
             if (request.method.equals("GET") && request.path.equals("/v1/join")) {
-                write(out, backend.ready() ? 204 : 503, backend.ready() ? "No Content" : "Service Unavailable",
+                boolean ready = backend.ready();
+                write(out, ready ? 204 : 503, ready ? "No Content" : "Service Unavailable",
                         "text/plain; charset=utf-8", new byte[0]);
                 return;
             }
@@ -75,7 +76,8 @@ final class NetherNetSignalingServer implements AutoCloseable {
                     writeText(out, 503, "Service Unavailable", "WebRTC peer backend is not ready");
                     return;
                 }
-                String networkId = URLDecoder.decode(request.path.substring("/v1/join/".length()), StandardCharsets.UTF_8);
+                String encodedNetworkId = request.path.substring("/v1/join/".length());
+                String networkId = decodePathSegment(encodedNetworkId);
                 if (networkId.isBlank() || networkId.contains("/")) {
                     writeText(out, 400, "Bad Request", "Invalid NetworkID");
                     return;
@@ -98,7 +100,7 @@ final class NetherNetSignalingServer implements AutoCloseable {
                     }
                     write(out, 200, "OK", "application/sdp", answer.getBytes(StandardCharsets.UTF_8));
                 } catch (Exception e) {
-                    System.err.println("[NetherNet] SDP exchange failed for " + networkId + ": " + e.getMessage());
+                    System.err.println("[NetherNet] SDP exchange failed: " + e.getMessage());
                     writeText(out, 502, "Bad Gateway", "SDP exchange failed");
                 }
                 return;
@@ -108,6 +110,26 @@ final class NetherNetSignalingServer implements AutoCloseable {
         } catch (Exception e) {
             if (running) System.err.println("[NetherNet] Signaling request failed: " + e.getMessage());
         }
+    }
+
+    private static String decodePathSegment(String raw) {
+        ByteArrayOutputStream out = new ByteArrayOutputStream(raw.length());
+        for (int i = 0; i < raw.length();) {
+            char c = raw.charAt(i);
+            if (c == '%') {
+                if (i + 2 >= raw.length()) throw new IllegalArgumentException("Invalid percent-encoding in NetworkID");
+                int hi = Character.digit(raw.charAt(i + 1), 16);
+                int lo = Character.digit(raw.charAt(i + 2), 16);
+                if (hi < 0 || lo < 0) throw new IllegalArgumentException("Invalid percent-encoding in NetworkID");
+                out.write((hi << 4) | lo);
+                i += 3;
+            } else {
+                byte[] bytes = String.valueOf(c).getBytes(StandardCharsets.UTF_8);
+                out.writeBytes(bytes);
+                i++;
+            }
+        }
+        return out.toString(StandardCharsets.UTF_8);
     }
 
     private static boolean looksLikeSdp(String sdp) {
