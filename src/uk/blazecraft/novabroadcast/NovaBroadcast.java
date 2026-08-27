@@ -4,7 +4,7 @@ import java.nio.file.*;
 import java.util.Arrays;
 
 public final class NovaBroadcast {
-    public static final String VERSION = "0.3-cleanroom";
+    public static final String VERSION = "0.4-cleanroom";
 
     public static void main(String[] args) {
         if (Arrays.asList(args).contains("--self-test")) {
@@ -51,7 +51,7 @@ public final class NovaBroadcast {
                 }
 
                 if (config.netherNetEnabled()) {
-                    System.out.println("[NovaBroadcast] Signaling service is running. Press Ctrl+C to stop.");
+                    System.out.println("[NovaBroadcast] NetherNet signaling/WebRTC service is running. Press Ctrl+C to stop.");
                     transport.await();
                 } else {
                     System.out.println("[NovaBroadcast] Authentication/core milestone completed successfully.");
