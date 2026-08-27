@@ -128,6 +128,7 @@ final class WebRtcPeerBackend implements NetherNetSignalingServer.PeerBackend, A
         private final String networkId;
         private final CompletableFuture<Void> iceComplete = new CompletableFuture<>();
         private final NetherNetFraming.ReliableReassembler reliableReassembler = new NetherNetFraming.ReliableReassembler();
+        private final BedrockConnectionTracker connectionTracker = new BedrockConnectionTracker();
         private final RTCPeerConnection connection;
         private volatile RTCDataChannel reliable;
         private volatile RTCDataChannel unreliable;
@@ -235,7 +236,19 @@ final class WebRtcPeerBackend implements NetherNetSignalingServer.PeerBackend, A
                 System.out.println("[Bedrock] " + networkId + " " + lane + " shape=" + value.shape() +
                         " packetId=" + header.packetId() + " senderSubClient=" + header.senderSubClientId() +
                         " targetSubClient=" + header.targetSubClientId() + " bytes=" + payload.length);
-            } else System.out.println("[Bedrock] " + networkId + " " + lane + " unrecognized/enveloped payload bytes=" + payload.length);
+            } else {
+                System.out.println("[Bedrock] " + networkId + " " + lane + " unrecognized/enveloped payload bytes=" + payload.length);
+            }
+
+            connectionTracker.observe(payload).ifPresent(observation -> {
+                String protocol = observation.requestedProtocol() == null ? "" :
+                        " protocol=" + observation.requestedProtocol();
+                System.out.println("[Bedrock] " + networkId + " stage=" + observation.stage() + protocol);
+                if (observation.stage() == BedrockConnectionTracker.Stage.CLIENT_INITIALIZED) {
+                    System.out.println("[Bedrock] " + networkId +
+                            " reached client-initialized milestone; transfer remains guarded until server-side login/envelope handling is complete.");
+                }
+            });
         }
 
         @Override public void close() {
