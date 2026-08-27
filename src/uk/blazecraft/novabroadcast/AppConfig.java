@@ -21,7 +21,10 @@ record AppConfig(
         String netherNetListenHost,
         int netherNetListenPort,
         int netherNetMaxSdpBytes,
-        int netherNetMaxSctpMessageSize) {
+        int netherNetMaxSctpMessageSize,
+        String netherNetStunUrl,
+        int netherNetIceMinPort,
+        int netherNetIceMaxPort) {
 
     static AppConfig load(Path path) throws IOException {
         if (!Files.exists(path)) {
@@ -31,6 +34,13 @@ record AppConfig(
         try (InputStream in = Files.newInputStream(path)) {
             p.load(in);
         }
+
+        int iceMinPort = parsePort(p, "nethernet.iceMinPort", 20000);
+        int iceMaxPort = parsePort(p, "nethernet.iceMaxPort", 20100);
+        if (iceMinPort > iceMaxPort) {
+            throw new IllegalArgumentException("nethernet.iceMinPort must be <= nethernet.iceMaxPort");
+        }
+
         return new AppConfig(
                 p.getProperty("microsoft.clientId", "").trim(),
                 p.getProperty("microsoft.scope", "XboxLive.signin XboxLive.offline_access").trim(),
@@ -48,7 +58,10 @@ record AppConfig(
                 p.getProperty("nethernet.listenHost", "0.0.0.0").trim(),
                 parsePort(p, "nethernet.listenPort", 19134),
                 parsePositive(p, "nethernet.maxSdpBytes", 1_048_576),
-                parsePositive(p, "nethernet.maxSctpMessageSize", 262_144)
+                parsePositive(p, "nethernet.maxSctpMessageSize", 262_144),
+                p.getProperty("nethernet.stunUrl", "stun:stun.l.google.com:19302").trim(),
+                iceMinPort,
+                iceMaxPort
         );
     }
 
@@ -91,13 +104,20 @@ session.name=NovaBroadcast
 # Extra guard for real MPSD PUT/DELETE operations. Leave false while testing.
 session.writeEnabled=false
 
-# NetherNet HTTP signaling foundation.
-# Until a WebRTC peer backend is implemented, capability checks return 503.
+# NetherNet/WebRTC.
 nethernet.enabled=false
 nethernet.listenHost=0.0.0.0
 nethernet.listenPort=19134
 nethernet.maxSdpBytes=1048576
 nethernet.maxSctpMessageSize=262144
+
+# STUN helps a container/NAT host advertise a reachable server-reflexive candidate.
+# Set blank to use host candidates only.
+nethernet.stunUrl=stun:stun.l.google.com:19302
+
+# Allocate/map this UDP range in the server/container firewall/Pterodactyl.
+nethernet.iceMinPort=20000
+nethernet.iceMaxPort=20100
 """;
     private DefaultConfig() {}
 }
