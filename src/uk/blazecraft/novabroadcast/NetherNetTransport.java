@@ -2,24 +2,20 @@ package uk.blazecraft.novabroadcast;
 
 import java.util.concurrent.CountDownLatch;
 
-/**
- * Clean-room NetherNet transport coordinator.
- *
- * The HTTP signaling and data-channel framing layers are implemented here,
- * while ICE/DTLS/SCTP/WebRTC peer creation remains behind PeerBackend.
- */
+/** Clean-room NetherNet transport coordinator. */
 final class NetherNetTransport implements AutoCloseable {
     static final String RELIABLE_CHANNEL = "ReliableDataChannel";
     static final String UNRELIABLE_CHANNEL = "UnreliableDataChannel";
 
     private final CountDownLatch stopped = new CountDownLatch(1);
     private NetherNetSignalingServer signaling;
+    private WebRtcPeerBackend backend;
 
     void start(AppConfig config) throws Exception {
         if (!config.netherNetEnabled()) return;
         if (signaling != null) return;
 
-        NetherNetSignalingServer.PeerBackend backend = new PendingWebRtcBackend();
+        backend = new WebRtcPeerBackend(config);
         signaling = new NetherNetSignalingServer(
                 config.netherNetListenHost(),
                 config.netherNetListenPort(),
@@ -27,9 +23,12 @@ final class NetherNetTransport implements AutoCloseable {
                 backend);
         signaling.start();
 
-        System.out.println("[NetherNet] HTTP signaling layer initialized.");
+        System.out.println("[NetherNet] Native WebRTC peer backend initialized.");
         System.out.println("[NetherNet] Expected channels: " + RELIABLE_CHANNEL + ", " + UNRELIABLE_CHANNEL);
-        System.out.println("[NetherNet] WebRTC peer backend is not connected yet; /v1/join reports unavailable.");
+        System.out.println("[NetherNet] ICE UDP range: " + config.netherNetIceMinPort() + "-" + config.netherNetIceMaxPort());
+        if (!config.netherNetStunUrl().isBlank()) {
+            System.out.println("[NetherNet] STUN: " + config.netherNetStunUrl());
+        }
     }
 
     void await() throws InterruptedException {
@@ -42,19 +41,10 @@ final class NetherNetTransport implements AutoCloseable {
             signaling.close();
             signaling = null;
         }
+        if (backend != null) {
+            backend.close();
+            backend = null;
+        }
         stopped.countDown();
-    }
-
-    private static final class PendingWebRtcBackend implements NetherNetSignalingServer.PeerBackend {
-        @Override
-        public boolean ready() {
-            return false;
-        }
-
-        @Override
-        public String answer(String networkId, String offerSdp) {
-            throw new UnsupportedOperationException(
-                    "ICE/DTLS/SCTP WebRTC peer backend has not been implemented yet");
-        }
     }
 }
