@@ -5,6 +5,7 @@ import dev.onvoid.webrtc.media.audio.AudioDeviceModule;
 import dev.onvoid.webrtc.media.audio.AudioLayer;
 
 import java.nio.charset.StandardCharsets;
+import java.nio.file.*;
 import java.util.*;
 
 final class SelfTest {
@@ -16,6 +17,7 @@ final class SelfTest {
         testTransferPacket2168();
         testDirectWireInspection();
         testLengthPrefixedWireInspection();
+        testNetherNetIdentity();
         System.out.println("[SelfTest] All tests passed.");
     }
 
@@ -109,6 +111,41 @@ final class SelfTest {
                 "expected length-prefixed packet shape");
         require(inspection.packetLength() == packet.length, "length-prefixed packet size mismatch");
         require(inspection.header().packetId() == 85, "expected nested TransferPacket ID 85");
+    }
+
+    private static void testNetherNetIdentity() {
+        try {
+            Path dir = Files.createTempDirectory("novabroadcast-identity-test");
+            Path key = dir.resolve("operator.key");
+            NetherNetIdentity first = NetherNetIdentity.loadOrCreate(key, "test.example");
+            String fingerprint = first.publicKeyFingerprint();
+            NetherNetIdentity second = NetherNetIdentity.loadOrCreate(key, "test.example");
+            require(fingerprint.equals(second.publicKeyFingerprint()), "operator identity did not persist");
+
+            String offer = "v=0\r\n" +
+                    "a=fingerprint:sha-256 AA:BB:CC\r\n" +
+                    "a=identity:ZXhhbXBsZQ==\r\n" +
+                    "m=application 9 UDP/DTLS/SCTP webrtc-datachannel\r\n";
+            NetherNetIdentity.Offer stripped = NetherNetIdentity.stripClientIdentity(offer);
+            require(stripped.hasIdentity(), "client identity was not detected");
+            require(!stripped.cleanSdp().contains("a=identity:"), "client identity was not stripped");
+
+            String answer = "v=0\r\n" +
+                    "o=- 1 2 IN IP4 127.0.0.1\r\n" +
+                    "s=-\r\n" +
+                    "t=0 0\r\n" +
+                    "a=fingerprint:sha-256 11:22:33:44\r\n" +
+                    "m=application 9 UDP/DTLS/SCTP webrtc-datachannel\r\n";
+            String signed = first.signAnswer(answer);
+            int identityAt = signed.indexOf("a=identity:");
+            int mediaAt = signed.indexOf("m=application");
+            require(identityAt > 0 && identityAt < mediaAt, "server identity was not inserted before media section");
+
+            Files.deleteIfExists(key);
+            Files.deleteIfExists(dir);
+        } catch (Exception e) {
+            throw new IllegalStateException("Self-test failed: NetherNet identity", e);
+        }
     }
 
     private static void require(boolean condition, String message) {
