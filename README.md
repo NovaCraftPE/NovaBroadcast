@@ -1,73 +1,42 @@
-# NovaBroadcast Clean-Room v0.3
+# NovaBroadcast Clean-Room v0.4
 
-This project was written from a blank project and does **not** include, download,
-compile, shade, or launch MCXboxBroadcast/Broadcaster source or JAR files.
+NovaBroadcast is an independent Java implementation and does **not** include,
+download, compile, shade, or launch MCXboxBroadcast/Broadcaster source or JARs.
 
 Current milestone:
 - Java 21 standalone application
 - Microsoft device-code sign-in and refresh-token cache
 - Xbox User Token / XSTS exchange and profile lookup
-- Clean MPSD session-directory client
-- MPSD SCID/template authorization preflight
-- Minimal authenticated-member session document builder
-- Guarded MPSD create/read/leave lifecycle primitives
-- NetherNet HTTP signaling endpoint foundation
-- NetherNet reliable/unreliable one-byte data framing
-- Reliable countdown fragmentation/reassembly
-- Java 21 GitHub Actions build + self-tests
-- No third-party Java dependencies
+- clean MPSD preflight and guarded session lifecycle
+- NetherNet HTTP signaling (`GET /v1/join`, `POST /v1/join/{networkId}`)
+- NetherNet reliable/unreliable one-byte framing
+- reliable countdown fragmentation/reassembly
+- native answering-side WebRTC peer creation via the general-purpose Apache-2.0 `webrtc-java` library
+- ICE gathering, DTLS/SCTP negotiation handled by the native WebRTC stack
+- incoming `ReliableDataChannel` and `UnreliableDataChannel` registration
+- fixed configurable ICE UDP port range for container/Pterodactyl deployments
+- Java 21 CI, protocol self-tests, and native WebRTC smoke test
 
-v0.3 still does **not** advertise a Minecraft joinable session or complete a
-Bedrock WebRTC connection. It intentionally does not embed guessed Minecraft
-Retail identifiers or pretend that normal HTTP/WebSocket code is a WebRTC
-implementation.
-
-## NetherNet foundation
-
-When `nethernet.enabled=true`, NovaBroadcast starts the public partner signaling
-shape documented by Mojang:
-
-    GET  /v1/join
-    POST /v1/join/{networkId}
-
-`POST` accepts `application/sdp` and validates the basic SDP shape before passing
-it to a peer backend. `NetworkID` is treated as an opaque path value rather than
-assuming it is numeric.
-
-The current `PeerBackend` intentionally reports not-ready, so `GET /v1/join`
-returns `503` instead of falsely claiming the server can complete WebRTC. The
-next transport milestone is the actual answering-side ICE/UDP + DTLS + SCTP
-WebRTC peer implementation and server identity assertion.
-
-The data-channel layer already implements the public NetherNet framing rules:
-`ReliableDataChannel` supports countdown fragments ending at header `0`, while
-`UnreliableDataChannel` only accepts an unfragmented header `0` frame.
-
-## MPSD safety
-
-When `session.enabled=true`, NovaBroadcast requires an explicit title-authorized
-`session.scid` and `session.template`, checks that the template is reachable,
-and renders the authenticated-member document. It does not embed title-owned
-Minecraft constants.
-
-`session.writeEnabled` is an additional guard. The current milestone still
-refuses to publish while the Minecraft-specific session data and working
-NetherNet peer transport are unfinished, preventing an unreachable Xbox session
-from being advertised.
+v0.4 can create a real WebRTC answering peer and return the gathered local SDP.
+It still deliberately does **not** publish a Minecraft/Xbox joinable session.
+Minecraft-specific MPSD properties and the required server identity assertion must
+be correct before `session.writeEnabled` can safely publish anything.
 
 ## Build and test
 
-Linux / Java 21:
+Requires Java 21 and Maven:
 
     ./build.sh
     java -jar NovaBroadcast.jar --self-test
+    java -jar NovaBroadcast.jar --webrtc-smoke-test
 
 Output:
 
     NovaBroadcast.jar
 
-Pull requests and development branches are compiled and self-tested by GitHub
-Actions on Java 21.
+The build uses `dev.onvoid.webrtc:webrtc-java:0.14.0`, which supplies the
+platform WebRTC JNI implementation. GitHub Actions verifies both normal logic
+and that the native WebRTC factory can actually load from the packaged JAR.
 
 ## Run
 
@@ -75,28 +44,49 @@ Actions on Java 21.
 
 On first launch `config.properties` is created. Set `microsoft.clientId` to an
 application/client ID authorized for the Xbox Live scopes used by the account
-flow, then start again. Tokens are cached in `data/auth.properties`.
+flow. Tokens are cached in `data/auth.properties`.
 
-Example dry-run configuration:
-
-    session.enabled=true
-    session.scid=<authorized SCID>
-    session.template=<authorized session template>
-    session.name=NovaBroadcast
-    session.writeEnabled=false
+Example transport configuration:
 
     nethernet.enabled=true
     nethernet.listenHost=0.0.0.0
     nethernet.listenPort=19134
     nethernet.maxSdpBytes=1048576
     nethernet.maxSctpMessageSize=262144
+    nethernet.stunUrl=stun:stun.l.google.com:19302
+    nethernet.iceMinPort=20000
+    nethernet.iceMaxPort=20100
 
-With the current v0.3 peer backend, the signaling service will run but advertise
-itself as unavailable until the real WebRTC backend is connected.
+The signaling TCP port and the configured ICE UDP range must be reachable from
+outside the container. On Pterodactyl, allocate/map the UDP range before testing
+real Bedrock connections.
+
+When an SDP offer is received, NovaBroadcast now:
+1. creates a native WebRTC peer,
+2. applies the remote offer,
+3. creates and sets a local answer,
+4. waits for ICE gathering to complete,
+5. returns the final local SDP with gathered candidates,
+6. accepts `ReliableDataChannel` / `UnreliableDataChannel`, and
+7. feeds received frames into the clean-room NetherNet framing layer.
+
+Received Bedrock payloads are currently surfaced to the transport boundary only.
+The next milestone is the Bedrock packet bridge/TransferPacket path plus the
+Minecraft-compatible identity/session metadata needed before MPSD publication.
+
+## MPSD safety
+
+`session.scid` and `session.template` must be explicit title-authorized values.
+NovaBroadcast does not embed guessed Minecraft Retail identifiers.
+
+`session.writeEnabled=false` remains the safe default. The project continues to
+refuse to publish an unreachable or incorrectly-described Xbox session while the
+remaining Minecraft-specific identity/session work is unfinished.
 
 ## Source provenance
 
-All Java files in this repository were created for NovaBroadcast. The code uses
-only Java's standard library. Public service endpoint names, signaling shapes,
-and framing rules are based on public Microsoft/Xbox documentation and Mojang's
-public Bedrock protocol documentation.
+All NovaBroadcast Java sources were written for this project. The WebRTC engine
+is consumed as an ordinary general-purpose Apache-2.0 Maven dependency; no
+broadcaster-specific implementation is copied or used at runtime. Public service
+endpoint names, signaling shapes, and framing rules are based on public
+Microsoft/Xbox and Mojang Bedrock documentation.
