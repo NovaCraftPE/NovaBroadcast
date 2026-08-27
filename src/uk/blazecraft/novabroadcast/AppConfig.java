@@ -26,22 +26,18 @@ record AppConfig(
         int netherNetIceMinPort,
         int netherNetIceMaxPort,
         String netherNetIdentityKey,
-        String netherNetIdentityDomain) {
+        String netherNetIdentityDomain,
+        boolean netherNetRequireClientIdentity,
+        String netherNetClientJwksUrl) {
 
     static AppConfig load(Path path) throws IOException {
-        if (!Files.exists(path)) {
-            Files.writeString(path, DefaultConfig.TEXT);
-        }
+        if (!Files.exists(path)) Files.writeString(path, DefaultConfig.TEXT);
         Properties p = new Properties();
-        try (InputStream in = Files.newInputStream(path)) {
-            p.load(in);
-        }
+        try (InputStream in = Files.newInputStream(path)) { p.load(in); }
 
         int iceMinPort = parsePort(p, "nethernet.iceMinPort", 20000);
         int iceMaxPort = parsePort(p, "nethernet.iceMaxPort", 20100);
-        if (iceMinPort > iceMaxPort) {
-            throw new IllegalArgumentException("nethernet.iceMinPort must be <= nethernet.iceMaxPort");
-        }
+        if (iceMinPort > iceMaxPort) throw new IllegalArgumentException("nethernet.iceMinPort must be <= nethernet.iceMaxPort");
 
         return new AppConfig(
                 p.getProperty("microsoft.clientId", "").trim(),
@@ -65,7 +61,9 @@ record AppConfig(
                 iceMinPort,
                 iceMaxPort,
                 p.getProperty("nethernet.identityKey", "data/nethernet-identity.key").trim(),
-                p.getProperty("nethernet.identityDomain", "self").trim()
+                p.getProperty("nethernet.identityDomain", "self").trim(),
+                Boolean.parseBoolean(p.getProperty("nethernet.requireClientIdentity", "false")),
+                p.getProperty("nethernet.clientJwksUrl", "").trim()
         );
     }
 
@@ -99,13 +97,10 @@ target.port=19133
 target.name=NovaCraft
 
 # Xbox Multiplayer Session Directory (MPSD)
-# session.enabled runs the authenticated template preflight.
 session.enabled=false
 session.scid=
 session.template=
 session.name=NovaBroadcast
-
-# Extra guard for real MPSD PUT/DELETE operations. Leave false while testing.
 session.writeEnabled=false
 
 # NetherNet/WebRTC.
@@ -115,15 +110,17 @@ nethernet.listenPort=19134
 nethernet.maxSdpBytes=1048576
 nethernet.maxSctpMessageSize=262144
 
-# Long-lived operator identity. Keep this private key stable across restarts.
+# Long-lived server/operator identity.
 nethernet.identityKey=data/nethernet-identity.key
 nethernet.identityDomain=self
 
-# STUN helps a container/NAT host advertise a reachable server-reflexive candidate.
-# Set blank to use host candidates only.
-nethernet.stunUrl=stun:stun.l.google.com:19302
+# Authenticated client admission. Mojang documents validation against the
+# Minecraft auth service public keys but does not define one universal JWKS URL,
+# so provide the title/environment-authorized endpoint explicitly.
+nethernet.requireClientIdentity=false
+nethernet.clientJwksUrl=
 
-# Allocate/map this UDP range in the server/container firewall/Pterodactyl.
+nethernet.stunUrl=stun:stun.l.google.com:19302
 nethernet.iceMinPort=20000
 nethernet.iceMaxPort=20100
 """;
