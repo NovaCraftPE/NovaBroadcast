@@ -3,7 +3,7 @@ package uk.blazecraft.novabroadcast;
 import java.nio.file.*;
 
 public final class NovaBroadcast {
-    public static final String VERSION = "0.1-cleanroom";
+    public static final String VERSION = "0.2-cleanroom";
 
     public static void main(String[] args) {
         System.out.println("NovaBroadcast " + VERSION);
@@ -35,7 +35,7 @@ public final class NovaBroadcast {
 
             if (!config.sessionEnabled()) {
                 System.out.println();
-                System.out.println("[Session] Clean-room MPSD/NetherNet implementation is disabled in v0.1.");
+                System.out.println("[Session] MPSD advertising is disabled.");
                 System.out.println("[Session] Authentication/core milestone completed successfully.");
                 return;
             }
