@@ -13,6 +13,7 @@ record AppConfig(
         int targetPort,
         String targetName,
         boolean sessionEnabled,
+        boolean sessionWriteEnabled,
         boolean netherNetEnabled,
         String sessionScid,
         String sessionTemplate,
@@ -35,6 +36,7 @@ record AppConfig(
                 Integer.parseInt(p.getProperty("target.port", "19132").trim()),
                 p.getProperty("target.name", "NovaCraft").trim(),
                 Boolean.parseBoolean(p.getProperty("session.enabled", "false")),
+                Boolean.parseBoolean(p.getProperty("session.writeEnabled", "false")),
                 Boolean.parseBoolean(p.getProperty("nethernet.enabled", "false")),
                 p.getProperty("session.scid", "").trim(),
                 p.getProperty("session.template", "").trim(),
@@ -55,11 +57,14 @@ target.port=19133
 target.name=NovaCraft
 
 # Xbox Multiplayer Session Directory (MPSD)
-# Leave disabled until you have title-authorized SCID/template values.
+# session.enabled runs the authenticated template preflight.
 session.enabled=false
 session.scid=
 session.template=
 session.name=NovaBroadcast
+
+# Extra guard for real MPSD PUT/DELETE operations. Leave false while testing.
+session.writeEnabled=false
 
 # NetherNet/WebRTC remains a separate milestone.
 nethernet.enabled=false
