@@ -14,6 +14,8 @@ Current milestone:
 - headless ICE/DTLS/SCTP peer operation with incoming/outbound data channels
 - persistent P-384 NetherNet operator identity
 - client `a=identity` stripping before native WebRTC SDP parsing
+- Minecraft OpenID discovery for current client signing keys
+- GameServerToken signature, issuer, audience, expiry/not-before, `cpk`, and detached fingerprint-proof validation
 - self-signed ES384 server identity JWT plus detached JWS over DTLS fingerprints
 - signed server `a=identity` insertion into every SDP answer
 - fixed configurable ICE UDP port range for container/Pterodactyl deployments
@@ -21,12 +23,12 @@ Current milestone:
 - conservative live Bedrock wire inspection for direct and exact-length-prefixed packet shapes
 - Java 21 CI, protocol/identity self-tests, exact transfer-byte tests, and native WebRTC smoke test
 
-v0.4 can create a real WebRTC answering peer, gather ICE, sign the final answer
-with the server identity required by Minecraft, and exchange framed binary
-application data over the two NetherNet data channels. It still deliberately
-does **not** publish a Minecraft/Xbox joinable MPSD session until the remaining
-Minecraft-specific session metadata and Bedrock connection-state handling are
-established.
+v0.4 can create a real WebRTC answering peer, gather ICE, authenticate a client
+assertion when present, sign the final answer with the server identity required by
+Minecraft, and exchange framed binary application data over the two NetherNet
+data channels. It still deliberately does **not** publish a Minecraft/Xbox
+joinable MPSD session until the remaining Minecraft-specific session metadata and
+Bedrock connection-state handling are established.
 
 ## Build and test
 
@@ -68,6 +70,10 @@ Example transport configuration:
     nethernet.maxSctpMessageSize=262144
     nethernet.identityKey=data/nethernet-identity.key
     nethernet.identityDomain=self
+    nethernet.requireClientIdentity=false
+    nethernet.clientIssuer=https://authorization.franchise.minecraft-services.net/
+    nethernet.clientAudience=api://auth-minecraft-services/multiplayer
+    nethernet.clientJwksUrl=
     nethernet.stunUrl=stun:stun.l.google.com:19302
     nethernet.iceMinPort=20000
     nethernet.iceMaxPort=20100
@@ -81,8 +87,35 @@ private and stable. Minecraft's plaintext-signaling TOFU trust is attached to
 this operator key, so deleting or replacing it makes the server appear as a new
 operator to clients.
 
-When an SDP offer is received, NovaBroadcast now:
-1. detects and removes the client's session-level `a=identity` before WebRTC parsing,
+## Minecraft client authentication
+
+NovaBroadcast uses the configured issuer's OpenID Connect discovery document:
+
+    https://authorization.franchise.minecraft-services.net/.well-known/openid-configuration
+
+The document supplies the expected issuer and current `jwks_uri`; the JWKS is
+then cached by the lower-level verifier and refreshed when a token references an
+unknown key ID. `nethernet.clientJwksUrl` is only an override for alternate/test
+environments and normally stays blank.
+
+For a client `a=identity`, NovaBroadcast verifies:
+1. the envelope and `idp.protocol=default`,
+2. the GameServerToken signature using the discovered signing key,
+3. `exp` and `nbf`,
+4. the token `iss` against the discovered issuer,
+5. the multiplayer `aud`,
+6. that the SDP identity-provider domain matches the token issuer,
+7. the P-384 `cpk` embedded in the token, and
+8. the detached ES384 signature over the offer's DTLS fingerprints.
+
+Authentication occurs before any ICE/DTLS/SCTP peer is allocated. Invalid
+assertions are rejected at signaling time with HTTP 403. With
+`nethernet.requireClientIdentity=false`, identityless offers may still be used
+for development; assertions that are present are always verified. Set it to
+`true` for authenticated-only operation.
+
+When an authenticated SDP offer is accepted, NovaBroadcast:
+1. removes the client's session-level `a=identity` before native WebRTC parsing,
 2. creates a headless native WebRTC peer and applies the cleaned offer,
 3. creates/sets an answer and waits for ICE gathering,
 4. self-signs a server JWT containing the long-lived public `cpk`,
@@ -91,11 +124,6 @@ When an SDP offer is received, NovaBroadcast now:
 7. returns the signed SDP answer,
 8. accepts `ReliableDataChannel` / `UnreliableDataChannel`, and
 9. reassembles/inspects recovered application payloads without mutating them.
-
-Client `GameServerToken` signature verification is not enabled yet. NovaBroadcast
-currently reports whether a client assertion is present, strips it as required
-for native WebRTC, and leaves cryptographic client admission/authorization as a
-separate milestone rather than pretending it has been verified.
 
 Outbound application payloads can also be sent through the same channels.
 Reliable payloads are fragmented according to NetherNet countdown framing;
