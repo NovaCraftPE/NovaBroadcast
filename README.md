@@ -9,23 +9,24 @@ Current milestone:
 - Xbox User Token / XSTS exchange and profile lookup
 - clean MPSD preflight and guarded session lifecycle
 - NetherNet HTTP signaling (`GET /v1/join`, `POST /v1/join/{networkId}`)
-- NetherNet reliable/unreliable one-byte framing
-- reliable countdown fragmentation/reassembly
-- native answering-side WebRTC peer creation via the general-purpose Apache-2.0 `webrtc-java` library
-- ICE gathering and DTLS/SCTP negotiation handled by the native WebRTC stack
-- headless WebRTC factory using the dummy audio layer
-- incoming and outbound `ReliableDataChannel` / `UnreliableDataChannel` handling
+- NetherNet reliable/unreliable one-byte framing and reliable fragmentation/reassembly
+- native answering-side WebRTC via the general-purpose Apache-2.0 `webrtc-java` library
+- headless ICE/DTLS/SCTP peer operation with incoming/outbound data channels
+- persistent P-384 NetherNet operator identity
+- client `a=identity` stripping before native WebRTC SDP parsing
+- self-signed ES384 server identity JWT plus detached JWS over DTLS fingerprints
+- signed server `a=identity` insertion into every SDP answer
 - fixed configurable ICE UDP port range for container/Pterodactyl deployments
 - version-aware Bedrock `TransferPacket` encoder boundary
 - conservative live Bedrock wire inspection for direct and exact-length-prefixed packet shapes
-- Java 21 CI, protocol self-tests, exact transfer-byte tests, and a native WebRTC smoke test
+- Java 21 CI, protocol/identity self-tests, exact transfer-byte tests, and native WebRTC smoke test
 
-v0.4 can create a real WebRTC answering peer, gather ICE, return the final local
-SDP, and exchange framed binary application data over the two NetherNet data
-channels. It still deliberately does **not** publish a Minecraft/Xbox joinable
-session. Minecraft-specific MPSD properties and the required server identity
-assertion must be correct before `session.writeEnabled` can safely publish
-anything.
+v0.4 can create a real WebRTC answering peer, gather ICE, sign the final answer
+with the server identity required by Minecraft, and exchange framed binary
+application data over the two NetherNet data channels. It still deliberately
+does **not** publish a Minecraft/Xbox joinable MPSD session until the remaining
+Minecraft-specific session metadata and Bedrock connection-state handling are
+established.
 
 ## Build and test
 
@@ -40,8 +41,9 @@ Output:
     NovaBroadcast.jar
 
 The build uses `dev.onvoid.webrtc:webrtc-java:0.14.0`, which supplies the
-platform WebRTC JNI implementation. GitHub Actions verifies both normal logic
-and that the native WebRTC factory can actually load from the packaged JAR.
+platform WebRTC JNI implementation. GitHub Actions verifies normal protocol
+logic, identity persistence/signing, and that the native WebRTC factory loads
+from the packaged JAR.
 
 On Debian/Ubuntu Linux, the JNI library is dynamically linked to PulseAudio even
 though NovaBroadcast uses WebRTC's dummy audio layer. Install the small runtime
@@ -64,26 +66,39 @@ Example transport configuration:
     nethernet.listenPort=19134
     nethernet.maxSdpBytes=1048576
     nethernet.maxSctpMessageSize=262144
+    nethernet.identityKey=data/nethernet-identity.key
+    nethernet.identityDomain=self
     nethernet.stunUrl=stun:stun.l.google.com:19302
     nethernet.iceMinPort=20000
     nethernet.iceMaxPort=20100
 
-The signaling TCP port and the configured ICE UDP range must be reachable from
+The signaling TCP port and configured ICE UDP range must be reachable from
 outside the container. On Pterodactyl, allocate/map the UDP range before testing
 real Bedrock connections.
 
+`nethernet.identityKey` is generated automatically on first use and must remain
+private and stable. Minecraft's plaintext-signaling TOFU trust is attached to
+this operator key, so deleting or replacing it makes the server appear as a new
+operator to clients.
+
 When an SDP offer is received, NovaBroadcast now:
-1. creates a headless native WebRTC peer,
-2. applies the remote offer,
-3. creates and sets a local answer,
-4. waits for ICE gathering to complete,
-5. returns the final local SDP with gathered candidates,
-6. accepts `ReliableDataChannel` / `UnreliableDataChannel`,
-7. reassembles/strips the documented NetherNet framing, and
-8. diagnostically inspects the recovered application payload without mutating it.
+1. detects and removes the client's session-level `a=identity` before WebRTC parsing,
+2. creates a headless native WebRTC peer and applies the cleaned offer,
+3. creates/sets an answer and waits for ICE gathering,
+4. self-signs a server JWT containing the long-lived public `cpk`,
+5. signs the answer's DTLS fingerprints with a detached ES384 JWS,
+6. inserts the resulting `a=identity` before the first media section,
+7. returns the signed SDP answer,
+8. accepts `ReliableDataChannel` / `UnreliableDataChannel`, and
+9. reassembles/inspects recovered application payloads without mutating them.
+
+Client `GameServerToken` signature verification is not enabled yet. NovaBroadcast
+currently reports whether a client assertion is present, strips it as required
+for native WebRTC, and leaves cryptographic client admission/authorization as a
+separate milestone rather than pretending it has been verified.
 
 Outbound application payloads can also be sent through the same channels.
-Reliable payloads are fragmented according to the NetherNet countdown framing;
+Reliable payloads are fragmented according to NetherNet countdown framing;
 oversized unreliable payloads are dropped instead of fragmented.
 
 ## Bedrock transfer boundary
@@ -98,11 +113,10 @@ The encoder is intentionally **not auto-injected yet**. A correct packet still
 has to be sent at the correct Bedrock connection state and with whatever packet
 length, compression, or encryption envelope the active client session expects.
 
-To make the next real-client test useful without guessing, incoming application
-payloads are inspected conservatively. NovaBroadcast logs a packet ID/sub-client
-header only when the bytes structurally match either a direct Bedrock packet or
-an exact VarUInt-length-prefixed packet. Unknown/enveloped payloads remain
-untouched and are reported as such.
+Incoming application payloads are inspected conservatively. NovaBroadcast logs
+a packet ID/sub-client header only when the bytes structurally match either a
+direct Bedrock packet or an exact VarUInt-length-prefixed packet. Unknown or
+enveloped payloads remain untouched and are reported as such.
 
 ## MPSD safety
 
@@ -111,14 +125,14 @@ NovaBroadcast does not embed guessed Minecraft Retail identifiers.
 
 `session.writeEnabled=false` remains the safe default. The project continues to
 refuse to publish an unreachable or incorrectly-described Xbox session while the
-remaining Minecraft-specific identity/session work is unfinished.
+remaining Minecraft-specific session work is unfinished.
 
 ## Source provenance
 
 All NovaBroadcast Java sources were written for this project. The WebRTC engine
 is consumed as an ordinary general-purpose Apache-2.0 Maven dependency; no
 broadcaster-specific implementation is copied or used at runtime. Public service
-endpoint names, signaling shapes, and framing rules are based on public
-Microsoft/Xbox and Mojang Bedrock documentation. Independent protocol libraries
-and specifications may be used only as interoperability cross-checks where the
-public Mojang documents do not specify an inner transport detail.
+endpoint names, signaling shapes, identity rules, and framing are based on
+public Microsoft/Xbox and Mojang Bedrock documentation. Independent protocol
+libraries/specifications are used only as interoperability cross-checks where
+public Mojang documentation does not specify an inner transport detail.
