@@ -1,6 +1,8 @@
 package uk.blazecraft.novabroadcast;
 
 import dev.onvoid.webrtc.PeerConnectionFactory;
+import dev.onvoid.webrtc.media.audio.AudioDeviceModule;
+import dev.onvoid.webrtc.media.audio.AudioLayer;
 
 import java.nio.charset.StandardCharsets;
 import java.util.*;
@@ -15,11 +17,13 @@ final class SelfTest {
     }
 
     static void runNativeWebRtc() {
-        PeerConnectionFactory factory = new PeerConnectionFactory();
+        AudioDeviceModule audioModule = new AudioDeviceModule(AudioLayer.kDummyAudio);
+        PeerConnectionFactory factory = new PeerConnectionFactory(audioModule);
         try {
-            System.out.println("[SelfTest] Native WebRTC factory initialized.");
+            System.out.println("[SelfTest] Native WebRTC headless factory initialized.");
         } finally {
             factory.dispose();
+            audioModule.dispose();
         }
         System.out.println("[SelfTest] Native WebRTC smoke test passed.");
     }
