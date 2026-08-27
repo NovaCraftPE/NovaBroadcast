@@ -57,6 +57,22 @@ final class WebRtcPeerBackend implements NetherNetSignalingServer.PeerBackend, A
         }
     }
 
+    void sendReliable(String networkId, byte[] applicationPayload) throws Exception {
+        Peer peer = requirePeer(networkId);
+        peer.sendReliable(applicationPayload);
+    }
+
+    boolean sendUnreliable(String networkId, byte[] applicationPayload) throws Exception {
+        Peer peer = requirePeer(networkId);
+        return peer.sendUnreliable(applicationPayload);
+    }
+
+    private Peer requirePeer(String networkId) {
+        Peer peer = peers.get(networkId);
+        if (peer == null) throw new IllegalStateException("No active WebRTC peer for NetworkID " + networkId);
+        return peer;
+    }
+
     @Override
     public void close() {
         if (closed) return;
@@ -113,6 +129,31 @@ final class WebRtcPeerBackend implements NetherNetSignalingServer.PeerBackend, A
             }
             System.out.println("[NetherNet] SDP answer ready for NetworkID " + networkId);
             return local.sdp;
+        }
+
+        void sendReliable(byte[] payload) throws Exception {
+            Objects.requireNonNull(payload, "payload");
+            RTCDataChannel channel = requireOpenChannel(reliable, NetherNetTransport.RELIABLE_CHANNEL);
+            for (byte[] frame : NetherNetFraming.frameReliable(payload, config.netherNetMaxSctpMessageSize())) {
+                channel.send(new RTCDataChannelBuffer(ByteBuffer.wrap(frame), true));
+            }
+        }
+
+        boolean sendUnreliable(byte[] payload) throws Exception {
+            Objects.requireNonNull(payload, "payload");
+            RTCDataChannel channel = requireOpenChannel(unreliable, NetherNetTransport.UNRELIABLE_CHANNEL);
+            var framed = NetherNetFraming.frameUnreliable(payload, config.netherNetMaxSctpMessageSize());
+            if (framed.isEmpty()) return false;
+            channel.send(new RTCDataChannelBuffer(ByteBuffer.wrap(framed.get()), true));
+            return true;
+        }
+
+        private RTCDataChannel requireOpenChannel(RTCDataChannel channel, String label) {
+            if (channel == null) throw new IllegalStateException(label + " has not been received yet");
+            if (channel.getState() != RTCDataChannelState.OPEN) {
+                throw new IllegalStateException(label + " is not open: " + channel.getState());
+            }
+            return channel;
         }
 
         private CompletableFuture<RTCSessionDescription> createAnswer() {
@@ -186,7 +227,7 @@ final class WebRtcPeerBackend implements NetherNetSignalingServer.PeerBackend, A
         }
 
         private void onBedrockPayload(boolean reliableChannel, byte[] payload) {
-            // Next milestone: decode/bridge Bedrock packets and send TransferPacket.
+            // Next milestone: identify Bedrock protocol state, then bridge/transfer.
             System.out.println("[NetherNet] Received " + payload.length + " Bedrock bytes on " +
                     (reliableChannel ? "reliable" : "unreliable") + " channel from " + networkId);
         }
