@@ -28,6 +28,8 @@ record AppConfig(
         String netherNetIdentityKey,
         String netherNetIdentityDomain,
         boolean netherNetRequireClientIdentity,
+        String netherNetClientIssuer,
+        String netherNetClientAudience,
         String netherNetClientJwksUrl) {
 
     static AppConfig load(Path path) throws IOException {
@@ -63,6 +65,8 @@ record AppConfig(
                 p.getProperty("nethernet.identityKey", "data/nethernet-identity.key").trim(),
                 p.getProperty("nethernet.identityDomain", "self").trim(),
                 Boolean.parseBoolean(p.getProperty("nethernet.requireClientIdentity", "false")),
+                p.getProperty("nethernet.clientIssuer", MinecraftClientIdentityVerifier.DEFAULT_ISSUER).trim(),
+                p.getProperty("nethernet.clientAudience", MinecraftClientIdentityVerifier.DEFAULT_AUDIENCE).trim(),
                 p.getProperty("nethernet.clientJwksUrl", "").trim()
         );
     }
@@ -114,10 +118,12 @@ nethernet.maxSctpMessageSize=262144
 nethernet.identityKey=data/nethernet-identity.key
 nethernet.identityDomain=self
 
-# Authenticated client admission. Mojang documents validation against the
-# Minecraft auth service public keys but does not define one universal JWKS URL,
-# so provide the title/environment-authorized endpoint explicitly.
+# Authenticated client admission. NovaBroadcast uses the issuer's OpenID
+# discovery document to obtain the current JWKS URI and expected issuer.
+# clientJwksUrl is an optional explicit override for testing/other environments.
 nethernet.requireClientIdentity=false
+nethernet.clientIssuer=https://authorization.franchise.minecraft-services.net/
+nethernet.clientAudience=api://auth-minecraft-services/multiplayer
 nethernet.clientJwksUrl=
 
 nethernet.stunUrl=stun:stun.l.google.com:19302
