@@ -1,0 +1,17 @@
+# Build output
+build/
+*.class
+*.jar
+
+# Runtime authentication data - NEVER COMMIT
+data/
+auth.properties
+
+# Local configuration
+config.properties
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+*.iml
