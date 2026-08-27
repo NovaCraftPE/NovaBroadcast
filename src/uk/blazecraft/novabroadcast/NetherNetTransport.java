@@ -1,5 +1,7 @@
 package uk.blazecraft.novabroadcast;
 
+import java.util.concurrent.CountDownLatch;
+
 /**
  * Clean-room NetherNet transport coordinator.
  *
@@ -10,6 +12,7 @@ final class NetherNetTransport implements AutoCloseable {
     static final String RELIABLE_CHANNEL = "ReliableDataChannel";
     static final String UNRELIABLE_CHANNEL = "UnreliableDataChannel";
 
+    private final CountDownLatch stopped = new CountDownLatch(1);
     private NetherNetSignalingServer signaling;
 
     void start(AppConfig config) throws Exception {
@@ -29,12 +32,17 @@ final class NetherNetTransport implements AutoCloseable {
         System.out.println("[NetherNet] WebRTC peer backend is not connected yet; /v1/join reports unavailable.");
     }
 
+    void await() throws InterruptedException {
+        stopped.await();
+    }
+
     @Override
     public void close() {
         if (signaling != null) {
             signaling.close();
             signaling = null;
         }
+        stopped.countDown();
     }
 
     private static final class PendingWebRtcBackend implements NetherNetSignalingServer.PeerBackend {
