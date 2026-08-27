@@ -227,9 +227,21 @@ final class WebRtcPeerBackend implements NetherNetSignalingServer.PeerBackend, A
         }
 
         private void onBedrockPayload(boolean reliableChannel, byte[] payload) {
-            // Next milestone: identify Bedrock protocol state, then bridge/transfer.
-            System.out.println("[NetherNet] Received " + payload.length + " Bedrock bytes on " +
-                    (reliableChannel ? "reliable" : "unreliable") + " channel from " + networkId);
+            String lane = reliableChannel ? "reliable" : "unreliable";
+            var inspection = BedrockWireInspector.inspect(payload);
+            if (inspection.isPresent()) {
+                BedrockWireInspector.Inspection value = inspection.get();
+                BedrockWireInspector.PacketHeader header = value.header();
+                System.out.println("[Bedrock] " + networkId + " " + lane +
+                        " shape=" + value.shape() +
+                        " packetId=" + header.packetId() +
+                        " senderSubClient=" + header.senderSubClientId() +
+                        " targetSubClient=" + header.targetSubClientId() +
+                        " bytes=" + payload.length);
+            } else {
+                System.out.println("[Bedrock] " + networkId + " " + lane +
+                        " unrecognized/enveloped payload bytes=" + payload.length);
+            }
         }
 
         @Override
