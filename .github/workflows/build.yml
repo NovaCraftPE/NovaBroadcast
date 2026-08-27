@@ -27,3 +27,6 @@ jobs:
 
       - name: Verify JAR
         run: test -s NovaBroadcast.jar
+
+      - name: Self-test
+        run: java -jar NovaBroadcast.jar --self-test
