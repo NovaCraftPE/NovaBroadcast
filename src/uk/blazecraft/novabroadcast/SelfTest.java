@@ -17,6 +17,7 @@ final class SelfTest {
         testTransferPacket2168();
         testDirectWireInspection();
         testLengthPrefixedWireInspection();
+        testConnectionTracking();
         testNetherNetIdentity();
         System.out.println("[SelfTest] All tests passed.");
     }
@@ -111,6 +112,34 @@ final class SelfTest {
                 "expected length-prefixed packet shape");
         require(inspection.packetLength() == packet.length, "length-prefixed packet size mismatch");
         require(inspection.header().packetId() == 85, "expected nested TransferPacket ID 85");
+    }
+
+    private static void testConnectionTracking() {
+        BedrockConnectionTracker tracker = new BedrockConnectionTracker();
+        byte[] requestNetworkSettings2168 = new byte[] {
+                (byte) 0xc1, 0x01, // packet header: RequestNetworkSettings (193)
+                0x00, 0x00, 0x08, 0x78 // protocol 2168, big-endian int32
+        };
+        BedrockConnectionTracker.Observation first = tracker.observe(requestNetworkSettings2168).orElseThrow();
+        require(first.packetId() == 193, "expected RequestNetworkSettings packet ID");
+        require(Integer.valueOf(2168).equals(first.requestedProtocol()), "expected protocol 2168");
+        require(tracker.stage() == BedrockConnectionTracker.Stage.NETWORK_SETTINGS_REQUESTED,
+                "expected network-settings stage");
+
+        tracker.observe(new byte[] {0x01}).orElseThrow();
+        require(tracker.stage() == BedrockConnectionTracker.Stage.LOGIN_RECEIVED,
+                "expected login stage");
+        tracker.observe(new byte[] {0x04}).orElseThrow();
+        require(tracker.stage() == BedrockConnectionTracker.Stage.CLIENT_HANDSHAKE_RECEIVED,
+                "expected client-handshake stage");
+        tracker.observe(new byte[] {0x08}).orElseThrow();
+        require(tracker.stage() == BedrockConnectionTracker.Stage.RESOURCE_PACK_RESPONSE_RECEIVED,
+                "expected resource-pack-response stage");
+        tracker.observe(new byte[] {0x71}).orElseThrow();
+        require(tracker.clientInitialized(), "expected client initialized stage");
+
+        tracker.observe(new byte[] {0x01}).orElseThrow();
+        require(tracker.clientInitialized(), "tracker stage must not move backwards");
     }
 
     private static void testNetherNetIdentity() {
