@@ -13,18 +13,27 @@ Current milestone:
 - Clean MPSD session-directory client
 - MPSD SCID/template authorization preflight
 - Safe session URI construction
+- Minimal authenticated-member session document builder
+- Guarded MPSD create/read/leave lifecycle primitives
+- Java 21 GitHub Actions build
 - Clean NetherNet transport boundary
 - No third-party Java dependencies
 
 v0.2 still does **not** advertise a Minecraft joinable session or accept/transfer
-Bedrock clients. When `session.enabled=true`, NovaBroadcast now requires an
-explicit title-authorized `session.scid` and `session.template`, checks that the
-template is reachable through MPSD, and then stops before writing a session.
+Bedrock clients. When `session.enabled=true`, NovaBroadcast requires an explicit
+title-authorized `session.scid` and `session.template`, checks that the template
+is reachable through MPSD, and renders the base authenticated-member document.
 It intentionally does not embed guessed Minecraft Retail identifiers.
 
-NetherNet/WebRTC remains disabled until the ICE/DTLS/SCTP transport and the
-Minecraft session document are implemented and tested against the current
-Bedrock release.
+The base MPSD document contains only public-schema member state: the authenticated
+`members.me` XUID and `properties.system.active=true`. Lifecycle code exists for
+conditional session creation (`If-None-Match: *`), readback, and leaving through
+`/members/me`.
+
+`session.writeEnabled` is an additional safety guard. Even when enabled, the
+current milestone refuses to publish while the Minecraft-specific session data
+and NetherNet/WebRTC transport are unfinished. This prevents an unreachable or
+misleading Xbox session from being advertised.
 
 ## Build
 
@@ -35,6 +44,9 @@ Linux / Java 21:
 Output:
 
     NovaBroadcast.jar
+
+Pull requests and development branches are also compiled by GitHub Actions on
+Java 21.
 
 ## Run
 
@@ -47,14 +59,16 @@ account flow, then start again.
 The application prints a Microsoft device-code URL and code. Tokens are cached
 in `data/auth.properties`.
 
-To exercise the MPSD preflight, configure title-authorized values:
+To exercise the MPSD preflight/dry run, configure title-authorized values:
 
     session.enabled=true
     session.scid=<authorized SCID>
     session.template=<authorized session template>
     session.name=NovaBroadcast
+    session.writeEnabled=false
 
-Do not enable `nethernet.enabled` yet.
+Keep both `session.writeEnabled` and `nethernet.enabled` disabled for normal
+v0.2 testing.
 
 ## Source provenance
 
