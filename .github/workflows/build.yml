@@ -1,0 +1,29 @@
+name: Build NovaBroadcast
+
+on:
+  push:
+    branches: [ main, "develop/**" ]
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Build
+        run: bash build.sh
+
+      - name: Verify JAR
+        run: test -s NovaBroadcast.jar
