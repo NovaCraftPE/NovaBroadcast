@@ -35,6 +35,14 @@ final class Http {
         return send(b.build());
     }
 
+    static Response delete(String url, Map<String,String> headers) throws Exception {
+        HttpRequest.Builder b = HttpRequest.newBuilder(URI.create(url))
+                .timeout(Duration.ofSeconds(40))
+                .DELETE();
+        headers.forEach(b::header);
+        return send(b.build());
+    }
+
     private static Response send(HttpRequest req) throws Exception {
         HttpResponse<String> r = CLIENT.send(req, HttpResponse.BodyHandlers.ofString());
         return new Response(r.statusCode(), r.body());
