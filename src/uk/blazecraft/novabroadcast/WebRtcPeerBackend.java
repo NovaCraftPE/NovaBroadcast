@@ -1,6 +1,8 @@
 package uk.blazecraft.novabroadcast;
 
 import dev.onvoid.webrtc.*;
+import dev.onvoid.webrtc.media.audio.AudioDeviceModule;
+import dev.onvoid.webrtc.media.audio.AudioLayer;
 
 import java.nio.ByteBuffer;
 import java.time.Duration;
@@ -18,13 +20,17 @@ final class WebRtcPeerBackend implements NetherNetSignalingServer.PeerBackend, A
     private static final Duration ICE_TIMEOUT = Duration.ofSeconds(20);
 
     private final AppConfig config;
+    private final AudioDeviceModule audioModule;
     private final PeerConnectionFactory factory;
     private final Map<String, Peer> peers = new ConcurrentHashMap<>();
     private volatile boolean closed;
 
     WebRtcPeerBackend(AppConfig config) {
         this.config = Objects.requireNonNull(config);
-        this.factory = new PeerConnectionFactory();
+        // NovaBroadcast carries data channels only. Using WebRTC's dummy audio
+        // layer avoids opening PulseAudio/ALSA devices on headless servers.
+        this.audioModule = new AudioDeviceModule(AudioLayer.kDummyAudio);
+        this.factory = new PeerConnectionFactory(audioModule);
     }
 
     @Override
@@ -58,6 +64,7 @@ final class WebRtcPeerBackend implements NetherNetSignalingServer.PeerBackend, A
         peers.values().forEach(Peer::close);
         peers.clear();
         factory.dispose();
+        audioModule.dispose();
     }
 
     private RTCConfiguration peerConfiguration() {
