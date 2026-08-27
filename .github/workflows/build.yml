@@ -21,6 +21,7 @@ jobs:
         with:
           distribution: temurin
           java-version: "21"
+          cache: maven
 
       - name: Build
         run: bash build.sh
@@ -30,3 +31,6 @@ jobs:
 
       - name: Self-test
         run: java -jar NovaBroadcast.jar --self-test
+
+      - name: Native WebRTC smoke test
+        run: java -jar NovaBroadcast.jar --webrtc-smoke-test
