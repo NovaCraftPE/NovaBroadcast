@@ -7,7 +7,7 @@ on:
     branches: [ main ]
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -43,10 +43,24 @@ jobs:
       - name: Native WebRTC smoke test
         run: java -jar NovaBroadcast.jar --webrtc-smoke-test
 
-      - name: Upload tested JAR
+      - name: Upload tested JAR artifact
         uses: actions/upload-artifact@v4
         with:
           name: NovaBroadcast-${{ github.sha }}
           path: NovaBroadcast.jar
           if-no-files-found: error
           retention-days: 14
+
+      - name: Publish direct development JAR
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/develop/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete development-latest --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes 2>/dev/null || true
+          git tag -f development-latest "$GITHUB_SHA"
+          git push origin refs/tags/development-latest --force
+          gh release create development-latest NovaBroadcast.jar \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "NovaBroadcast Development Build" \
+            --notes "Tested development build from commit $GITHUB_SHA. Download NovaBroadcast.jar directly from Assets." \
+            --prerelease
