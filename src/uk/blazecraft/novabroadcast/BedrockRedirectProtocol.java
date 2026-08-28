@@ -6,12 +6,10 @@ import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
 
 /**
- * Minimal protocol-2168 packet codec used only to reach a safe redirect point.
+ * Minimal protocol-2168/2169 packet codec used only to reach a safe redirect point.
  * It does not create a world and does not implement general Bedrock gameplay.
  */
 final class BedrockRedirectProtocol {
-    static final int SUPPORTED_PROTOCOL = 2168;
-
     static final int LOGIN = 1;
     static final int PLAY_STATUS = 2;
     static final int RESOURCE_PACKS_INFO = 6;
@@ -21,7 +19,7 @@ final class BedrockRedirectProtocol {
     static final int NETWORK_SETTINGS = 143;
     static final int REQUEST_NETWORK_SETTINGS = 193;
 
-    // Since protocol 2168 the response wire value is Status.ordinal()-1:
+    // For the verified 2168/2169 path the response wire value is Status.ordinal()-1:
     // REFUSED=0, SEND_PACKS=1, HAVE_ALL_PACKS=2, COMPLETED=3.
     static final int PACK_STATUS_HAVE_ALL_PACKS = 2;
     static final int PACK_STATUS_COMPLETED = 3;
