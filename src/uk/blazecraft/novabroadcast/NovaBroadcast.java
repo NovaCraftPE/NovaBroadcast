@@ -2,6 +2,7 @@ package uk.blazecraft.novabroadcast;
 
 import java.nio.file.*;
 import java.util.Arrays;
+import java.util.List;
 
 public final class NovaBroadcast {
     public static final String VERSION = "0.5-cleanroom";
@@ -19,6 +20,20 @@ public final class NovaBroadcast {
             }
             if (Arrays.asList(args).contains("--config-check")) {
                 ConfigCheck.run(Path.of("config.properties"));
+                return;
+            }
+            if (Arrays.asList(args).contains("--prepare-activity-import")) {
+                Path dump = Path.of("data/mpsd-activities.json");
+                Path output = Path.of("data/activity-import");
+                List<Path> candidates = ActivityImport.prepare(dump, output);
+                System.out.println("[ActivityImport] Prepared " + candidates.size() + " candidate(s) under " + output.toAbsolutePath());
+                for (Path candidate : candidates) {
+                    System.out.println("[ActivityImport] " + candidate.resolve("session.properties").toAbsolutePath());
+                }
+                if (candidates.isEmpty()) {
+                    System.out.println("[ActivityImport] No complete sessionRef candidates were present in the dump.");
+                }
+                System.out.println("[ActivityImport] Main config was not modified and publishing remains disabled.");
                 return;
             }
 
