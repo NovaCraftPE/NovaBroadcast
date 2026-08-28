@@ -60,9 +60,18 @@ final class ConfigCheck {
             }
             if (!config.bedrockRedirectEnabled()) fail("live MPSD publication requires bedrock.redirectEnabled=true");
             if (!config.netherNetEnabled()) fail("live MPSD publication requires nethernet.enabled=true");
+            if (config.sessionSetActivity()) ok("Xbox activity binding", "enabled after successful publication");
+            else {
+                warn("session.setActivity=false; the session will be published but not bound as the account's current activity");
+                warnings++;
+            }
         } else {
             warn("MPSD live publication is disabled");
             warnings++;
+            if (config.sessionSetActivity()) {
+                warn("session.setActivity=true has no effect while session.writeEnabled=false");
+                warnings++;
+            }
         }
 
         if (config.clientId().isBlank()) {
