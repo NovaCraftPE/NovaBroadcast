@@ -11,7 +11,8 @@
     <properties>
         <maven.compiler.release>21</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <webrtc.version>1.0.4</webrtc.version>
+        <kastle.webrtc.version>1.0.4</kastle.webrtc.version>
+        <onvoid.webrtc.version>0.14.0</onvoid.webrtc.version>
         <minecraftauth.version>5.0.1-20260507.085226-5</minecraftauth.version>
         <nethernet.version>1.7.3</nethernet.version>
     </properties>
@@ -26,26 +27,44 @@
             <url>https://repo.opencollab.dev/maven-snapshots/</url>
         </repository>
         <repository>
+            <id>sonatype-snapshots</id>
+            <url>https://s01.oss.sonatype.org/content/repositories/snapshots/</url>
+        </repository>
+        <repository>
+            <id>jitpack</id>
+            <url>https://jitpack.io</url>
+        </repository>
+        <repository>
             <id>lenni0451-snapshots</id>
             <url>https://maven.lenni0451.net/snapshots</url>
         </repository>
     </repositories>
 
     <dependencies>
-        <!-- netty-transport-nethernet 1.7.3 is built against Kastle WebRTC. Keep the
-             Java API and Linux JNI artifact on the exact same Kastle version. -->
+        <!-- NetherNet 1.7.3 uses the Kastle WebRTC fork. The Java API and native
+             Linux classifier must stay on the exact same version. -->
         <dependency>
             <groupId>dev.kastle.webrtc</groupId>
             <artifactId>webrtc-java</artifactId>
-            <version>${webrtc.version}</version>
+            <version>${kastle.webrtc.version}</version>
         </dependency>
         <dependency>
             <groupId>dev.kastle.webrtc</groupId>
             <artifactId>webrtc-java</artifactId>
-            <version>${webrtc.version}</version>
+            <version>${kastle.webrtc.version}</version>
             <classifier>linux-x86_64</classifier>
             <scope>runtime</scope>
         </dependency>
+
+        <!-- Kept temporarily only because the older local smoke-test method still
+             references the Onvoid API. No Onvoid native classifier is packaged, so it
+             cannot replace the Kastle JNI library used by NetherNet. -->
+        <dependency>
+            <groupId>dev.onvoid.webrtc</groupId>
+            <artifactId>webrtc-java</artifactId>
+            <version>${onvoid.webrtc.version}</version>
+        </dependency>
+
         <dependency>
             <groupId>net.raphimc</groupId>
             <artifactId>MinecraftAuth</artifactId>
