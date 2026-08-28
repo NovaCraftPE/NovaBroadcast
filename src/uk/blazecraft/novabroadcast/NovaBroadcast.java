@@ -59,7 +59,8 @@ public final class NovaBroadcast {
             MicrosoftTokens msa = microsoft.getTokens();
 
             XboxAuth xboxAuth = new XboxAuth();
-            XboxIdentity xbox = xboxAuth.authenticate(msa.accessToken(), config.xboxRelyingParty());
+            System.out.println("[Xbox] Requesting XSTS for sandbox: " + config.xboxSandboxId());
+            XboxIdentity xbox = xboxAuth.authenticate(msa.accessToken(), config.xboxRelyingParty(), config.xboxSandboxId());
 
             System.out.println("[Xbox] Authenticated.");
             if (!xbox.gamertag().isBlank()) System.out.println("[Xbox] Gamertag: " + xbox.gamertag());
@@ -131,6 +132,7 @@ public final class NovaBroadcast {
 
     private static void livePreflight(AppConfig config, XboxIdentity xbox) throws Exception {
         System.out.println("[LivePreflight] Running read-only readiness checks. No MPSD session will be published.");
+        System.out.println("[LivePreflight] Xbox sandbox: " + config.xboxSandboxId());
         BedrockTargetProbe.Result target = BedrockTargetProbe.probe(config.targetHost(), config.targetPort(), 3000);
         System.out.println("[LivePreflight] Target: " + target.motd() + " / " + target.version() +
                 " / protocol " + target.protocol());
