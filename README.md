@@ -1,201 +1,208 @@
 # NovaBroadcast Clean-Room v0.5
 
-NovaBroadcast is an independent Java implementation and does **not** include,
-download, compile, shade, or launch MCXboxBroadcast/Broadcaster source or JARs.
+NovaBroadcast is an independent Java implementation for Xbox/Bedrock session discovery, NetherNet/WebRTC admission and a narrow Bedrock redirect bootstrap. It does **not** include, download, compile, shade, inspect, or launch MCXboxBroadcast/Broadcaster source or JARs.
 
-Current milestone:
+## Current milestone
+
 - Java 21 standalone application
 - Microsoft device-code sign-in and refresh-token cache
-- Xbox User Token / XSTS exchange and profile lookup
-- clean MPSD preflight, guarded session publication, activity binding, and shutdown cleanup
-- authenticated MPSD activity discovery, offline candidate extraction, automatic consecutive-capture diffing
+- Xbox User Token / XSTS authentication and profile lookup
+- read-only Xbox Presence diagnostics
+- MPSD template preflight, guarded session publication and Xbox activity-handle binding
+- one-shot MPSD shutdown cleanup for normal exit, Ctrl+C and JVM/container shutdown
+- authenticated account-owned MPSD activity discovery
+- offline session candidate extraction and automatic consecutive-capture diffing
 - NetherNet HTTP signaling (`GET /v1/join`, `POST /v1/join/{networkId}`)
 - native answering-side WebRTC via Apache-2.0 `webrtc-java`
 - persistent P-384 NetherNet operator identity and signed server `a=identity`
 - Minecraft client GameServerToken/fingerprint-proof verification through OpenID discovery
-- verified Bedrock protocol 2168 and 2169 redirect-only handshakes
-- guarded automatic `TransferPacket` to the configured target after resource-pack completion
+- verified redirect-only Bedrock paths for protocol 2168 and 2169
+- guarded automatic `TransferPacket` to the configured target
+- RakNet UDP target-server reachability/protocol preflight
 - explicit MPSD custom-property file support without guessed Minecraft-owned keys
-- Java 21 CI, protocol/identity/redirect/import/diff self-tests, native WebRTC smoke test, and tested JAR artifact
+- Java 21 CI, protocol/identity/redirect/import/diff/presence/target tests, native WebRTC smoke test and tested JAR artifact
 
-## Build and test
+## Build and tests
 
-    ./build.sh
-    java -jar NovaBroadcast.jar --self-test
-    java -jar NovaBroadcast.jar --config-check
-    java -jar NovaBroadcast.jar --webrtc-smoke-test
+```bash
+./build.sh
+java -jar NovaBroadcast.jar --self-test
+java -jar NovaBroadcast.jar --config-check
+java -jar NovaBroadcast.jar --webrtc-smoke-test
+```
 
-Output:
+On Debian/Ubuntu Linux, install the WebRTC JNI runtime dependency:
 
-    NovaBroadcast.jar
-
-On Debian/Ubuntu Linux install the WebRTC JNI runtime dependency:
-
-    apt-get update && apt-get install -y --no-install-recommends libpulse0
+```bash
+apt-get update && apt-get install -y --no-install-recommends libpulse0
+```
 
 ## Run
 
-    java -jar NovaBroadcast.jar
+```bash
+java -jar NovaBroadcast.jar
+```
 
-On first launch `config.properties` is created. Set `microsoft.clientId` to an
-application/client ID authorized for the Xbox Live scopes used by the account
-flow. Tokens are cached in `data/auth.properties`.
+On first launch `config.properties` is created. Set `microsoft.clientId` to an application/client ID authorized for the Xbox Live scopes used by the account flow. Tokens are cached in `data/auth.properties`.
+
+## Validate the destination Bedrock server
+
+Before any Xbox test, verify that the transfer target is actually reachable:
+
+```bash
+java -jar NovaBroadcast.jar --target-check
+```
+
+This sends a standard RakNet unconnected ping only. It does not log into the target. NovaBroadcast reports the target MOTD, Bedrock version, network protocol and player counts, then fails if the target's advertised protocol does not match `bedrock.gameVersion`.
+
+## Read-only live readiness check
+
+Once Xbox authentication and MPSD candidate values are configured, run:
+
+```bash
+java -jar NovaBroadcast.jar --live-preflight
+```
+
+This command does **not** create, update, join, leave or bind an MPSD session. It checks:
+
+- configured Bedrock transfer target reachability and protocol match
+- Xbox authentication
+- current Xbox Presence/title records for the account
+- account-owned MPSD activity query access
+- configured MPSD template access and connectivity capability
+- configured session/member custom JSON syntax
+
+Presence is diagnostic only. NovaBroadcast does not manufacture or impersonate Minecraft title presence. A real Xbox/Minecraft session is still required to establish whether Xbox considers the account actively engaged in the Minecraft title during the live test.
 
 ## Discover your own Xbox/Minecraft activity
 
-The clean-room discovery path reads only the authenticated account's own MPSD
-activity data. It does not create, overwrite, join, leave, or publish sessions.
+Use the account's own legitimate Minecraft session to obtain title/session metadata without guessing private constants:
 
-For the complete discovery + offline extraction flow:
+```bash
+java -jar NovaBroadcast.jar --discover-session
+```
 
-    java -jar NovaBroadcast.jar --discover-session
+The command saves the raw account-owned response to:
 
-This performs the authenticated activity query, stores the raw response at:
-
-    data/mpsd-activities.json
+```text
+data/mpsd-activities.json
+```
 
 and prepares each complete `sessionRef` under:
 
-    data/activity-import/candidate-N/
+```text
+data/activity-import/candidate-N/
+```
 
-Each candidate can contain:
+A candidate can contain:
 
-    session.properties
-    session-custom.json
-    member-custom.json   # only when the member custom object is unambiguous
+```text
+session.properties
+session-custom.json
+member-custom.json
+```
 
-`session.properties` contains the discovered SCID, template and session name plus
-paths to extracted custom-property JSON. It always keeps:
+`member-custom.json` is emitted only when the included member metadata is unambiguous. Every generated candidate deliberately contains:
 
-    session.writeEnabled=false
-    session.setActivity=false
+```properties
+session.writeEnabled=false
+session.setActivity=false
+```
 
-so discovery cannot accidentally publish or replace the account's current Xbox
-activity.
+so discovery cannot accidentally publish a captured session.
 
-When a previous capture already exists, NovaBroadcast automatically rotates it to:
+If a previous capture exists, NovaBroadcast rotates it to `data/mpsd-activities-previous.json`. A second `--discover-session` automatically compares the two captures and writes `data/activity-diff.txt`.
 
-    data/mpsd-activities-previous.json
+The diff matches activities by title ID + SCID + template rather than array position, so result reordering does not create false changes. Changed paths are grouped as `CUSTOM`, `SESSION_REF`, `SYSTEM`, or `OTHER` to help identify values tied to the original host/session.
 
-and, for `--discover-session`, automatically compares the two account-owned
-captures and writes:
+The individual stages remain available:
 
-    data/activity-diff.txt
+```bash
+java -jar NovaBroadcast.jar --dump-activities
+java -jar NovaBroadcast.jar --prepare-activity-import
+java -jar NovaBroadcast.jar --diff-last-activities
+java -jar NovaBroadcast.jar --diff-activities before.json after.json
+```
 
-The diff matches activities by title ID + SCID + template rather than array
-position, so reordered query results do not create false changes. Changed paths
-are grouped as `CUSTOM`, `SESSION_REF`, `SYSTEM`, or `OTHER` to make host/session
-specific values easier to identify.
-
-The stages can also be run independently:
-
-    java -jar NovaBroadcast.jar --dump-activities
-    java -jar NovaBroadcast.jar --prepare-activity-import
-    java -jar NovaBroadcast.jar --diff-last-activities
-    java -jar NovaBroadcast.jar --diff-activities before.json after.json
-
-A useful clean-room test is:
-
-1. Start or join one normal Minecraft Bedrock multiplayer activity on the same
-   Microsoft/Xbox account and run `--discover-session`.
-2. Start or join another normal Minecraft multiplayer activity and run the same
-   command again.
-3. Inspect `data/activity-diff.txt` and the generated candidate directories.
-
-**Important:** captured custom properties are reference data, not automatically
-publication-ready. Title/session fields can contain values tied to the original
-live Minecraft host or activity. NovaBroadcast deliberately does not infer which
-private title fields should be replaced. The main configuration is never modified
-by discovery and live publication remains opt-in.
+Captured title custom properties are reference data, not automatically publication-ready. NovaBroadcast intentionally does not infer which private Minecraft fields should be copied, replaced or regenerated.
 
 ## Bedrock redirect bootstrap
 
-The redirect path is intentionally narrow rather than a general Bedrock server.
-The currently verified stable versions are:
+NovaBroadcast is not a general Bedrock server. It implements only enough of the initial Bedrock connection to reach a safe `TransferPacket`.
 
-- 1.26.40 -> protocol 2168
-- 1.26.43 -> protocol 2168
-- 1.26.44 -> protocol 2168
-- 1.26.45 -> protocol 2169
+Verified versions:
 
-The 1.26.45 mapping is based on Mojang's tagged protocol schemas for the exact
-redirect path used here: RequestNetworkSettings, NetworkSettings, Login,
-ResourcePacksInfo, ResourcePackStack, ResourcePackClientResponse and Transfer.
-NovaBroadcast does not assume compatibility for other protocol versions.
+- `1.26.40` -> protocol `2168`
+- `1.26.43` -> protocol `2168`
+- `1.26.44` -> protocol `2168`
+- `1.26.45` -> protocol `2169`
+
+The 1.26.45 mapping is based on Mojang's tagged schemas for the exact packets used by this redirect path: RequestNetworkSettings, NetworkSettings, Login, ResourcePacksInfo, ResourcePackStack, ResourcePackClientResponse and Transfer. Other protocol versions remain fail-closed until explicitly verified.
 
 Example:
 
-    target.host=54.37.245.44
-    target.port=19133
-    target.name=NovaCraft
-    bedrock.redirectEnabled=false
-    bedrock.gameVersion=1.26.44
+```properties
+target.host=54.37.245.44
+target.port=19133
+target.name=NovaCraft
+bedrock.redirectEnabled=false
+bedrock.gameVersion=1.26.45
+```
 
-When enabled, the redirect state machine performs:
+The narrow state machine is:
 
-    RequestNetworkSettings
-      -> NetworkSettings (compression enum NONE / 2)
-      -> Login
-      -> PlayStatus(LoginSuccess) + empty ResourcePacksInfo
-      -> empty ResourcePackStack
-      -> TransferPacket
+```text
+RequestNetworkSettings
+  -> NetworkSettings (Compression::None)
+  -> Login
+  -> PlayStatus(LoginSuccess) + empty ResourcePacksInfo
+  -> empty ResourcePackStack
+  -> TransferPacket
+```
 
-Post-NetworkSettings no-compression batches use the Bedrock method prefix
-`0xFF`. NovaBroadcast skips the optional Bedrock encryption handshake and does
-not fabricate `StartGame`, chunks, entities, or a fake world. Mismatched protocol
-versions receive no invented compatibility response.
+Post-NetworkSettings no-compression batches use method byte `0xFF`. NovaBroadcast skips the optional Bedrock encryption handshake and does not fabricate `StartGame`, chunks, entities or a fake world.
 
 ## NetherNet
 
-Example transport configuration:
+Example configuration:
 
-    nethernet.enabled=true
-    nethernet.listenHost=0.0.0.0
-    nethernet.listenPort=19134
-    nethernet.maxSdpBytes=1048576
-    nethernet.maxSctpMessageSize=262144
-    nethernet.identityKey=data/nethernet-identity.key
-    nethernet.identityDomain=self
-    nethernet.requireClientIdentity=false
-    nethernet.clientIssuer=https://authorization.franchise.minecraft-services.net/
-    nethernet.clientAudience=api://auth-minecraft-services/multiplayer
-    nethernet.clientJwksUrl=
-    nethernet.stunUrl=stun:stun.l.google.com:19302
-    nethernet.iceMinPort=20000
-    nethernet.iceMaxPort=20100
+```properties
+nethernet.enabled=true
+nethernet.listenHost=0.0.0.0
+nethernet.listenPort=19134
+nethernet.maxSdpBytes=1048576
+nethernet.maxSctpMessageSize=262144
+nethernet.identityKey=data/nethernet-identity.key
+nethernet.identityDomain=self
+nethernet.requireClientIdentity=false
+nethernet.clientIssuer=https://authorization.franchise.minecraft-services.net/
+nethernet.clientAudience=api://auth-minecraft-services/multiplayer
+nethernet.clientJwksUrl=
+nethernet.stunUrl=stun:stun.l.google.com:19302
+nethernet.iceMinPort=20000
+nethernet.iceMaxPort=20100
+```
 
-The signaling TCP port and configured ICE UDP range must be externally reachable.
-The client supplies its own opaque `NetworkID` in `POST /v1/join/{networkId}`;
-NovaBroadcast treats it as an opaque routing/admission identifier and does not
-assume a numeric format.
+The signaling TCP port and configured ICE UDP range must be externally reachable. The client supplies its own opaque `NetworkID` in `POST /v1/join/{networkId}`; NovaBroadcast does not assume a numeric format.
 
 ## MPSD publication
 
-MPSD session templates are title-owned resources configured through Xbox Partner
-Center. NovaBroadcast requires explicit authorized values:
+MPSD session templates are title-owned resources configured through Xbox Partner Center. NovaBroadcast requires explicit authorized values:
 
-    session.enabled=false
-    session.scid=
-    session.template=
-    session.name=NovaBroadcast
-    session.writeEnabled=false
-    session.setActivity=false
+```properties
+session.enabled=false
+session.scid=
+session.template=
+session.name=NovaBroadcast
+session.writeEnabled=false
+session.setActivity=false
+session.customPropertiesFile=
+session.memberCustomPropertiesFile=
+```
 
-Microsoft MPSD templates control system constants such as visibility and
-connectivity capabilities. Minecraft-specific bootstrap values live in custom
-title properties and are not publicly standardized by MPSD. NovaBroadcast does
-not guess those private Minecraft property names.
+Microsoft MPSD defines the session-system contract, while Minecraft-specific bootstrap values live in title custom properties. NovaBroadcast does not guess Minecraft's private custom-property names, Retail SCID or template.
 
-When legitimate title/session integration data is available, put the exact
-custom JSON objects into files and reference them:
-
-    session.customPropertiesFile=data/session-custom.json
-    session.memberCustomPropertiesFile=data/member-custom.json
-
-Each file must contain one JSON object. The member file is optional; the session
-custom-properties file is mandatory for a live publication.
-
-A live MPSD write requires all of the following:
+A live write requires all of the following:
 
 1. `session.writeEnabled=true`
 2. `nethernet.enabled=true`
@@ -203,36 +210,22 @@ A live MPSD write requires all of the following:
 4. the selected template reports `connectivity=true`
 5. `session.customPropertiesFile` is present and valid JSON
 
-If any requirement fails, NovaBroadcast refuses to advertise the session. The
-create call uses `If-None-Match: *` so an existing session with the same name is
-not silently overwritten.
+The create uses `If-None-Match: *`, preventing silent replacement of an existing session with the same name.
 
-If `session.setActivity=true`, a successful publication is followed by the
-standard Xbox MPSD `activity` handle write referencing the same SCID/template/
-session name. This binds the published session as the signed-in user's current
-join-in-progress/social activity. It is separately opt-in because setting a new
-activity replaces the account's previous bound activity.
+When `session.setActivity=true`, a successful publication is followed by an Xbox MPSD `activity` handle referencing the same SCID/template/session. If activity binding fails, NovaBroadcast attempts to leave the newly created member before surfacing the error.
 
-When NovaBroadcast shuts down after publishing a live session, it removes its
-active MPSD member. MPSD then clears the member's bound activity handle as part
-of the normal session lifecycle, avoiding a stale joinable activity after the
-NetherNet/WebRTC host has stopped.
+After a successful publication, `MpsdSessionLease` owns the active membership. Normal shutdown, Ctrl+C or JVM/container termination performs a one-shot member leave. MPSD's normal lifecycle then removes the bound activity handle, reducing stale joinable sessions after the NetherNet/WebRTC host stops.
 
 ## Minecraft client authentication
 
-NovaBroadcast uses the configured issuer's OpenID Connect discovery document:
+NovaBroadcast uses the configured Minecraft multiplayer OpenID issuer. For client `a=identity`, it verifies the GameServerToken signature, time claims, issuer, multiplayer audience, P-384 `cpk`, IdP domain and detached ES384 DTLS-fingerprint proof before allocating ICE/DTLS/SCTP state. Invalid assertions are rejected during signaling.
 
-    https://authorization.franchise.minecraft-services.net/.well-known/openid-configuration
+## Remaining live-only validation
 
-For a client `a=identity`, NovaBroadcast verifies the GameServerToken signature,
-time claims, issuer, multiplayer audience, P-384 `cpk`, IdP domain and detached
-ES384 DTLS-fingerprint proof before allocating ICE/DTLS/SCTP state. Invalid
-assertions are rejected at signaling time.
+The offline/server-side implementation is intentionally not described as Xbox-console validated yet. The final interoperability milestone requires a genuine Minecraft/Xbox activity owned by the authenticated account, a real MPSD publication using verified title-specific metadata, and a friend/console join that reaches NetherNet and receives the final Bedrock transfer.
+
+Xbox Presence is part of that validation. Microsoft can mark an active MPSD member inactive when Presence no longer considers the user engaged in the title. NovaBroadcast therefore reports Presence during `--live-preflight` rather than inventing title engagement or private title credentials.
 
 ## Source provenance
 
-All NovaBroadcast Java sources were written for this project. The WebRTC engine
-is consumed as a normal general-purpose Apache-2.0 dependency. Public Microsoft,
-Xbox and Mojang documentation is used for service/protocol behavior; independent
-Bedrock protocol libraries are used only as interoperability cross-checks. No
-MCXboxBroadcast/Broadcaster implementation source or runtime is used.
+All NovaBroadcast project Java sources were written independently for this project. Public Microsoft/Xbox and Mojang documentation is used for service/protocol behavior. The WebRTC engine is consumed as a normal general-purpose Apache-2.0 dependency. Independent Bedrock/RakNet specifications are used only for interoperability cross-checks. No MCXboxBroadcast/Broadcaster implementation source or runtime is used.
