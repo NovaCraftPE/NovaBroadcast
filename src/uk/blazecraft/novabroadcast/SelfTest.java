@@ -14,6 +14,7 @@ final class SelfTest {
         testFragmentedReliable();
         testUnreliable();
         testOutOfOrderRejected();
+        testNetworkSettingsPacket();
         testTransferPacket2168();
         testDirectWireInspection();
         testLengthPrefixedWireInspection();
@@ -78,6 +79,23 @@ final class SelfTest {
         require(rejected, "out-of-order fragment must be rejected");
     }
 
+    private static void testNetworkSettingsPacket() {
+        byte[] encoded = BedrockNetworkSettingsEncoder.encodeNoCompression();
+        byte[] expected = new byte[] {
+                (byte) 0x8f, 0x01, // packet 143
+                0x00, 0x00,       // compression threshold
+                0x02, 0x00,       // compression algorithm None
+                0x00,             // throttle disabled
+                0x00,             // throttle threshold
+                0x00, 0x00, 0x00, 0x00 // throttle scalar 0.0f LE
+        };
+        require(Arrays.equals(expected, encoded), "NetworkSettings bytes mismatch");
+        byte[] prefixed = BedrockNetworkSettingsEncoder.matchWireShape(
+                encoded, BedrockWireInspector.Shape.LENGTH_PREFIXED_PACKET);
+        require(prefixed.length == encoded.length + 1, "expected one-byte NetworkSettings length prefix");
+        require(Byte.toUnsignedInt(prefixed[0]) == encoded.length, "NetworkSettings prefix length mismatch");
+    }
+
     private static void testTransferPacket2168() {
         byte[] encoded = BedrockTransferEncoder.encodePacket(2168, "127.0.0.1", 19132, false);
         byte[] expected = new byte[] {
@@ -117,8 +135,8 @@ final class SelfTest {
     private static void testConnectionTracking() {
         BedrockConnectionTracker tracker = new BedrockConnectionTracker();
         byte[] requestNetworkSettings2168 = new byte[] {
-                (byte) 0xc1, 0x01, // packet header: RequestNetworkSettings (193)
-                0x00, 0x00, 0x08, 0x78 // protocol 2168, big-endian int32
+                (byte) 0xc1, 0x01,
+                0x00, 0x00, 0x08, 0x78
         };
         BedrockConnectionTracker.Observation first = tracker.observe(requestNetworkSettings2168).orElseThrow();
         require(first.packetId() == 193, "expected RequestNetworkSettings packet ID");
@@ -127,8 +145,7 @@ final class SelfTest {
                 "expected network-settings stage");
 
         tracker.observe(new byte[] {0x01}).orElseThrow();
-        require(tracker.stage() == BedrockConnectionTracker.Stage.LOGIN_RECEIVED,
-                "expected login stage");
+        require(tracker.stage() == BedrockConnectionTracker.Stage.LOGIN_RECEIVED, "expected login stage");
         tracker.observe(new byte[] {0x04}).orElseThrow();
         require(tracker.stage() == BedrockConnectionTracker.Stage.CLIENT_HANDSHAKE_RECEIVED,
                 "expected client-handshake stage");
