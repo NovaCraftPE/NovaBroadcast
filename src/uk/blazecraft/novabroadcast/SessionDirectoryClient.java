@@ -93,7 +93,8 @@ final class SessionDirectoryClient {
             if (!(constantsObj instanceof Map<?,?> constants)) return new TemplateInfo("unknown", false, false);
             Object systemObj = constants.get("system");
             if (!(systemObj instanceof Map<?,?> system)) return new TemplateInfo("unknown", false, false);
-            String visibility = String.valueOf(system.getOrDefault("visibility", "open"));
+            Object visibilityObj = system.get("visibility");
+            String visibility = visibilityObj == null ? "open" : String.valueOf(visibilityObj);
             boolean connectivity = false;
             boolean gameplay = false;
             Object capabilitiesObj = system.get("capabilities");
