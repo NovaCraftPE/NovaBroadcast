@@ -6,6 +6,8 @@ import java.util.*;
 
 record AppConfig(
         String clientId,
+        String clientSecret,
+        String redirectUri,
         String scope,
         String tenant,
         String xboxRelyingParty,
@@ -48,6 +50,8 @@ record AppConfig(
 
         return new AppConfig(
                 p.getProperty("microsoft.clientId", "").trim(),
+                p.getProperty("microsoft.clientSecret", "").trim(),
+                p.getProperty("microsoft.redirectUri", "").trim(),
                 normalizeMicrosoftScope(p.getProperty("microsoft.scope", "xboxlive.signin xboxlive.offline_access")),
                 p.getProperty("microsoft.tenant", "consumers").trim(),
                 p.getProperty("xbox.relyingParty", "http://xboxlive.com").trim(),
@@ -112,7 +116,11 @@ record AppConfig(
 final class DefaultConfig {
     static final String TEXT = """
 # NovaBroadcast clean-room configuration
+# Xbox website sign-in uses Microsoft's documented authorization-code flow.
+# Register the redirect URI on the Entra app and create a client secret.
 microsoft.clientId=
+microsoft.clientSecret=
+microsoft.redirectUri=
 microsoft.scope=xboxlive.signin xboxlive.offline_access
 microsoft.tenant=consumers
 xbox.relyingParty=http://xboxlive.com
@@ -122,7 +130,7 @@ target.port=19133
 target.name=NovaCraft
 
 # Bedrock redirect bootstrap. Leave disabled until NetherNet signaling is
-# reachable and you are ready to test a real 1.26.44 / protocol-2168 client.
+# reachable and you are ready to test a real supported Bedrock client.
 bedrock.redirectEnabled=false
 bedrock.gameVersion=1.26.44
 
