@@ -6,7 +6,7 @@
 
     <groupId>uk.blazecraft</groupId>
     <artifactId>novabroadcast</artifactId>
-    <version>0.8-nethernet-preflight</version>
+    <version>0.9-minecraft-live</version>
 
     <properties>
         <maven.compiler.release>21</maven.compiler.release>
@@ -56,9 +56,8 @@
             <scope>runtime</scope>
         </dependency>
 
-        <!-- Kept temporarily only because the older local smoke-test method still
-             references the Onvoid API. No Onvoid native classifier is packaged, so it
-             cannot replace the Kastle JNI library used by NetherNet. -->
+        <!-- Kept temporarily because the older local smoke-test method still
+             references the Onvoid API. No Onvoid native classifier is packaged. -->
         <dependency>
             <groupId>dev.onvoid.webrtc</groupId>
             <artifactId>webrtc-java</artifactId>
@@ -102,7 +101,7 @@
                             <shadedArtifactAttached>false</shadedArtifactAttached>
                             <transformers>
                                 <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
-                                    <mainClass>uk.blazecraft.novabroadcast.NovaBroadcast</mainClass>
+                                    <mainClass>uk.blazecraft.novabroadcast.Launcher</mainClass>
                                 </transformer>
                             </transformers>
                         </configuration>
