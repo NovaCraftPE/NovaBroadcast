@@ -91,14 +91,13 @@ public final class NovaBroadcast {
                 return;
             }
 
-            SessionDirectoryClient sessions = null;
-            boolean publishedSession = false;
+            MpsdSessionLease sessionLease = null;
             try (NetherNetTransport transport = new NetherNetTransport()) {
                 transport.start(config);
 
                 if (config.sessionEnabled()) {
-                    sessions = new SessionDirectoryClient(xbox);
-                    publishedSession = sessions.start(config);
+                    SessionDirectoryClient sessions = new SessionDirectoryClient(xbox);
+                    if (sessions.start(config)) sessionLease = new MpsdSessionLease(sessions, config);
                 } else {
                     System.out.println();
                     System.out.println("[Session] MPSD advertising is disabled.");
@@ -111,14 +110,7 @@ public final class NovaBroadcast {
                     System.out.println("[NovaBroadcast] Authentication/core milestone completed successfully.");
                 }
             } finally {
-                if (publishedSession && sessions != null) {
-                    try {
-                        sessions.leavePublishedSession(config);
-                    } catch (Exception cleanup) {
-                        System.err.println("[Session] Shutdown cleanup failed: " + cleanup.getMessage());
-                        if (Boolean.getBoolean("novabroadcast.debug")) cleanup.printStackTrace();
-                    }
-                }
+                if (sessionLease != null) sessionLease.close();
             }
 
         } catch (InterruptedException e) {
