@@ -5,7 +5,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-/** Read-only probe for the public Minecraft Windows MPSD service configuration. */
+/** Read-only probe for the Minecraft Windows MPSD and session prerequisites. */
 final class MinecraftMpsdPreflight {
     static final String SERVICE_CONFIG_ID = "4fc10100-5f7a-4470-899b-280835760c07";
     static final String TEMPLATE_NAME = "MinecraftLobby";
@@ -14,7 +14,7 @@ final class MinecraftMpsdPreflight {
     private MinecraftMpsdPreflight() {}
 
     static void run(AppConfig config) throws Exception {
-        System.out.println("NovaBroadcast 0.6-bedrock-auth");
+        System.out.println("NovaBroadcast 0.7-session-preflight");
         System.out.println("[MinecraftPreflight] READ-ONLY test. No session or activity handle will be created.");
 
         BedrockTargetProbe.Result target = BedrockTargetProbe.probe(config.targetHost(), config.targetPort(), 3000);
@@ -46,7 +46,8 @@ final class MinecraftMpsdPreflight {
         }
 
         System.out.println("[MinecraftPreflight] PASS MinecraftLobby is accessible with the Bedrock authentication chain.");
-        System.out.println("[MinecraftPreflight] No MPSD write was attempted. session.writeEnabled remains untouched.");
+        System.out.println("[MinecraftPreflight] Continuing with RTA + Minecraft session-document validation...");
+        MinecraftSessionPreflight.run(config);
     }
 
     private static String encode(String value) {
