@@ -6,7 +6,7 @@
 
     <groupId>uk.blazecraft</groupId>
     <artifactId>novabroadcast</artifactId>
-    <version>0.4-cleanroom</version>
+    <version>0.5-cleanroom</version>
 
     <properties>
         <maven.compiler.release>21</maven.compiler.release>
