@@ -49,18 +49,30 @@ final class MinecraftBedrockAuth {
                     .login(DeviceCodeMsaAuthService::new, deviceCode);
         }
 
+        // Refresh the same token chain used by a Bedrock session before reading any
+        // Minecraft-session claims. A deserialized cache may have a stale/empty
+        // Minecraft session even while its Xbox XSTS token is still usable.
         var xsts = manager.getXboxLiveXstsToken().getUpToDate();
+        manager.getPlayFabToken().getUpToDate();
+        var minecraftSession = manager.getMinecraftSession().getUpToDate();
+
         String authorization = xsts.getAuthorizationHeader();
         if (authorization == null || authorization.isBlank()) {
             throw new IllegalStateException("Bedrock authentication returned an empty Xbox authorization header.");
         }
 
-        String pmsgId = "";
+        String pmsgId;
         try {
-            pmsgId = manager.getMinecraftSession().getCached().getParsedToken().getPayload().reqString("pmid");
+            pmsgId = minecraftSession.getParsedToken().getPayload().reqString("pmid");
         } catch (Exception e) {
-            System.out.println("[BedrockAuth] WARN Minecraft session token did not expose pmid; session publishing preflight will fail closed.");
+            throw new IllegalStateException(
+                    "Fresh Minecraft session token did not expose the required pmid claim. " +
+                    "Delete data/minecraft-bedrock-auth.json and run the preflight once more to force a fresh device-code login.", e);
         }
+        if (pmsgId == null || pmsgId.isBlank()) {
+            throw new IllegalStateException("Fresh Minecraft session token returned an empty pmid claim.");
+        }
+        System.out.println("[BedrockAuth] Minecraft session pmid is available.");
 
         Files.createDirectories(CACHE.toAbsolutePath().getParent());
         Files.writeString(CACHE, BedrockAuthManager.toJson(manager).toString());
