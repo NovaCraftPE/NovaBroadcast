@@ -44,6 +44,13 @@ public final class NovaBroadcast {
             if (!xbox.gamertag().isBlank()) System.out.println("[Xbox] Gamertag: " + xbox.gamertag());
             if (!xbox.xuid().isBlank()) System.out.println("[Xbox] XUID: " + xbox.xuid());
 
+            if (Arrays.asList(args).contains("--dump-activities")) {
+                SessionDirectoryClient sessions = new SessionDirectoryClient(xbox);
+                sessions.dumpOwnActivities(Path.of("data/mpsd-activities.json"));
+                System.out.println("[NovaBroadcast] Activity discovery complete. No session was created or modified.");
+                return;
+            }
+
             try (NetherNetTransport transport = new NetherNetTransport()) {
                 transport.start(config);
 
