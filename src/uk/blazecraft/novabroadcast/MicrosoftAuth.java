@@ -83,14 +83,15 @@ final class MicrosoftAuth {
 
     private MicrosoftTokens authorizationCodeFlow() throws Exception {
         String state = randomState();
-        String authorizeUrl = oauthBase() + "/authorize?" + query(Map.of(
-                "client_id", config.clientId(),
-                "response_type", "code",
-                "redirect_uri", config.redirectUri(),
-                "response_mode", "query",
-                "scope", config.scope(),
-                "state", state
-        ));
+        Map<String,String> authorizeFields = new LinkedHashMap<>();
+        authorizeFields.put("client_id", config.clientId());
+        authorizeFields.put("response_type", "code");
+        authorizeFields.put("redirect_uri", config.redirectUri());
+        authorizeFields.put("response_mode", "query");
+        authorizeFields.put("scope", config.scope());
+        authorizeFields.put("state", state);
+        authorizeFields.put("prompt", "select_account");
+        String authorizeUrl = oauthBase() + "/authorize?" + query(authorizeFields);
 
         URI redirect = URI.create(config.redirectUri());
         String callbackPath = redirect.getPath();
@@ -105,7 +106,7 @@ final class MicrosoftAuth {
             System.out.println("[Auth] Microsoft callback listener is ready on " +
                     config.microsoftCallbackListenHost() + ":" + config.microsoftCallbackListenPort() + callbackPath);
             System.out.println("[Auth] Public redirect URI: " + config.redirectUri());
-            System.out.println("[Auth] Open this URL in a browser and sign in with the Microsoft/Xbox account:");
+            System.out.println("[Auth] Open this URL in a browser and choose the Microsoft/Xbox account to use:");
             System.out.println(authorizeUrl);
             System.out.println("[Auth] Waiting up to " + config.microsoftCallbackTimeoutSeconds() + " seconds for Microsoft to redirect back automatically...");
 
@@ -186,10 +187,6 @@ final class MicrosoftAuth {
         exchange.getResponseBody().flush();
         exchange.close();
 
-        // Only unblock the OAuth flow after the HTTP response has been fully sent.
-        // This avoids callbackServer.stop(0) racing the active exchange and causing
-        // browsers/curl to see an empty reply. A plain health-check GET must not
-        // consume the one real authorization callback either.
         if (isAuthResponse) {
             responses.offer(ar);
         }
