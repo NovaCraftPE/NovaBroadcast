@@ -14,7 +14,7 @@ final class MinecraftMpsdPreflight {
     private MinecraftMpsdPreflight() {}
 
     static void run(AppConfig config) throws Exception {
-        System.out.println("NovaBroadcast 0.7-session-preflight");
+        System.out.println("NovaBroadcast 0.7-xbox-rpc-preflight");
         System.out.println("[MinecraftPreflight] READ-ONLY test. No session or activity handle will be created.");
 
         BedrockTargetProbe.Result target = BedrockTargetProbe.probe(config.targetHost(), config.targetPort(), 3000);
@@ -48,6 +48,9 @@ final class MinecraftMpsdPreflight {
         System.out.println("[MinecraftPreflight] PASS MinecraftLobby is accessible with the Bedrock authentication chain.");
         System.out.println("[MinecraftPreflight] Continuing with RTA + Minecraft session-document validation...");
         MinecraftSessionPreflight.run(config);
+        System.out.println("[MinecraftPreflight] Continuing with Xbox-RPC NetherNet signaling validation...");
+        XboxRpcSignalingPreflight.run(config);
+        System.out.println("[MinecraftPreflight] PASS all read-only Minecraft broadcast prerequisites completed.");
     }
 
     private static String encode(String value) {
@@ -58,6 +61,7 @@ final class MinecraftMpsdPreflight {
         if (body == null) return "";
         String cleaned = body.replaceAll("(?i)XBL3\\.0[^\\\"\\s]*", "[redacted]")
                 .replaceAll("(?i)Bearer\\s+[^\\\"\\s]+", "Bearer [redacted]")
+                .replaceAll("(?i)MCToken\\s+[^\\\"\\s]+", "MCToken [redacted]")
                 .replaceAll("[\\r\\n]+", " ")
                 .trim();
         if (cleaned.length() > 800) cleaned = cleaned.substring(0, 800) + "…";
