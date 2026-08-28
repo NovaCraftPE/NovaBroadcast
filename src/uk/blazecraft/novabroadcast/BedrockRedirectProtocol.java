@@ -54,11 +54,11 @@ final class BedrockRedirectProtocol {
     static byte[] emptyResourcePackStack(String gameVersion) {
         ByteArrayOutputStream out = packetHeader(RESOURCE_PACK_STACK);
         out.write(0); // forced to accept
-        BedrockBatchCodec.writeVarUInt(out, 0); // no behavior packs
         BedrockBatchCodec.writeVarUInt(out, 0); // no resource packs
         writeString(out, gameVersion);
         BedrockBatchCodec.writeVarUInt(out, 0); // no experiments
         out.write(0); // experiments previously toggled
+        out.write(0); // has editor packs
         return out.toByteArray();
     }
 
