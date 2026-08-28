@@ -19,6 +19,8 @@ final class SelfTest {
         testDirectWireInspection();
         testLengthPrefixedWireInspection();
         testConnectionTracking();
+        testBedrockBatchCodec();
+        testRedirectHandshake2168();
         testNetherNetIdentity();
         System.out.println("[SelfTest] All tests passed.");
     }
@@ -82,12 +84,12 @@ final class SelfTest {
     private static void testNetworkSettingsPacket() {
         byte[] encoded = BedrockNetworkSettingsEncoder.encodeNoCompression();
         byte[] expected = new byte[] {
-                (byte) 0x8f, 0x01, // packet 143
-                0x00, 0x00,       // compression threshold
-                0x02, 0x00,       // compression algorithm None
-                0x00,             // throttle disabled
-                0x00,             // throttle threshold
-                0x00, 0x00, 0x00, 0x00 // throttle scalar 0.0f LE
+                (byte) 0x8f, 0x01,
+                0x00, 0x00,
+                0x02, 0x00,
+                0x00,
+                0x00,
+                0x00, 0x00, 0x00, 0x00
         };
         require(Arrays.equals(expected, encoded), "NetworkSettings bytes mismatch");
         byte[] prefixed = BedrockNetworkSettingsEncoder.matchWireShape(
@@ -154,9 +156,67 @@ final class SelfTest {
                 "expected resource-pack-response stage");
         tracker.observe(new byte[] {0x71}).orElseThrow();
         require(tracker.clientInitialized(), "expected client initialized stage");
-
         tracker.observe(new byte[] {0x01}).orElseThrow();
         require(tracker.clientInitialized(), "tracker stage must not move backwards");
+    }
+
+    private static void testBedrockBatchCodec() {
+        byte[] packet = new byte[] {(byte) 0xc1, 0x01, 0, 0, 8, 0x78};
+        byte[] before = BedrockBatchCodec.encodeSingle(packet, true, false);
+        require(Byte.toUnsignedInt(before[0]) == 0xfe, "pre-login batch marker missing");
+        var decodedBefore = BedrockBatchCodec.decode(before, false).orElseThrow();
+        require(decodedBefore.hasGamePacketMarker(), "batch marker not detected");
+        require(Arrays.equals(packet, decodedBefore.packets().get(0)), "pre-login packet decode mismatch");
+
+        byte[] after = BedrockBatchCodec.encodeSingle(new byte[] {0x01}, true, true);
+        require(Byte.toUnsignedInt(after[0]) == 0xfe && Byte.toUnsignedInt(after[1]) == 0xff,
+                "post-NetworkSettings NONE compression prefix missing");
+        var decodedAfter = BedrockBatchCodec.decode(after, true).orElseThrow();
+        require(decodedAfter.compressionPrefix(), "NONE compression prefix not detected");
+        require(decodedAfter.packets().get(0)[0] == 0x01, "post-settings packet decode mismatch");
+    }
+
+    private static void testRedirectHandshake2168() {
+        try {
+            List<byte[]> sent = new ArrayList<>();
+            BedrockRedirectSession session = new BedrockRedirectSession(
+                    "127.0.0.1", 19132, "1.26.44", true, sent::add);
+
+            byte[] request = new byte[] {(byte) 0xc1, 0x01, 0x00, 0x00, 0x08, 0x78};
+            session.accept(BedrockBatchCodec.encodeSingle(request, true, false));
+            require(session.stage() == BedrockRedirectSession.Stage.NETWORK_SETTINGS_SENT,
+                    "redirect did not send NetworkSettings");
+            require(session.compressionNegotiated(), "redirect did not enable post-settings framing");
+            var networkSettings = BedrockBatchCodec.decode(sent.get(0), false).orElseThrow();
+            require(BedrockRedirectProtocol.packetId(networkSettings.packets().get(0)) == 143,
+                    "expected NetworkSettings packet");
+
+            session.accept(BedrockBatchCodec.encodeSingle(new byte[] {0x01}, true, true));
+            require(session.stage() == BedrockRedirectSession.Stage.LOGIN_ACCEPTED,
+                    "redirect did not accept Login");
+            var loginReply = BedrockBatchCodec.decode(sent.get(1), true).orElseThrow();
+            require(loginReply.packets().size() == 2, "login reply must contain two packets");
+            require(BedrockRedirectProtocol.packetId(loginReply.packets().get(0)) == 2,
+                    "login reply missing PlayStatus");
+            require(BedrockRedirectProtocol.packetId(loginReply.packets().get(1)) == 6,
+                    "login reply missing ResourcePacksInfo");
+
+            session.accept(BedrockBatchCodec.encodeSingle(new byte[] {0x08, 0x02}, true, true));
+            require(session.stage() == BedrockRedirectSession.Stage.PACK_STACK_SENT,
+                    "redirect did not send ResourcePackStack");
+            var stackReply = BedrockBatchCodec.decode(sent.get(2), true).orElseThrow();
+            require(BedrockRedirectProtocol.packetId(stackReply.packets().get(0)) == 7,
+                    "expected ResourcePackStack packet");
+
+            session.accept(BedrockBatchCodec.encodeSingle(new byte[] {0x08, 0x03}, true, true));
+            require(session.stage() == BedrockRedirectSession.Stage.TRANSFER_SENT,
+                    "redirect did not send TransferPacket");
+            var transferReply = BedrockBatchCodec.decode(sent.get(3), true).orElseThrow();
+            require(BedrockRedirectProtocol.packetId(transferReply.packets().get(0)) == 85,
+                    "expected final TransferPacket");
+        } catch (Exception e) {
+            throw new IllegalStateException("Self-test failed: redirect handshake", e);
+        }
     }
 
     private static void testNetherNetIdentity() {
