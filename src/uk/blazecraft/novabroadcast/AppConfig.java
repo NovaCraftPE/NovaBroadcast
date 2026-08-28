@@ -48,7 +48,7 @@ record AppConfig(
 
         return new AppConfig(
                 p.getProperty("microsoft.clientId", "").trim(),
-                p.getProperty("microsoft.scope", "XboxLive.signin XboxLive.offline_access").trim(),
+                normalizeMicrosoftScope(p.getProperty("microsoft.scope", "xboxlive.signin xboxlive.offline_access")),
                 p.getProperty("microsoft.tenant", "consumers").trim(),
                 p.getProperty("xbox.relyingParty", "http://xboxlive.com").trim(),
                 p.getProperty("target.host", "127.0.0.1").trim(),
@@ -81,6 +81,16 @@ record AppConfig(
         );
     }
 
+    private static String normalizeMicrosoftScope(String raw) {
+        if (raw == null || raw.isBlank()) return "xboxlive.signin xboxlive.offline_access";
+        String[] parts = raw.trim().split("\\s+");
+        for (int i = 0; i < parts.length; i++) {
+            if (parts[i].equalsIgnoreCase("xboxlive.signin")) parts[i] = "xboxlive.signin";
+            else if (parts[i].equalsIgnoreCase("xboxlive.offline_access")) parts[i] = "xboxlive.offline_access";
+        }
+        return String.join(" ", parts);
+    }
+
     private static int parsePort(Properties p, String key, int fallback) {
         int value = parsePositive(p, key, fallback);
         if (value > 65535) throw new IllegalArgumentException(key + " must be <= 65535");
@@ -103,7 +113,7 @@ final class DefaultConfig {
     static final String TEXT = """
 # NovaBroadcast clean-room configuration
 microsoft.clientId=
-microsoft.scope=XboxLive.signin XboxLive.offline_access
+microsoft.scope=xboxlive.signin xboxlive.offline_access
 microsoft.tenant=consumers
 xbox.relyingParty=http://xboxlive.com
 
