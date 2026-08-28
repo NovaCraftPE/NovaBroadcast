@@ -25,6 +25,7 @@ final class BedrockRedirectSession {
     private final String targetHost;
     private final int targetPort;
     private final String gameVersion;
+    private final int configuredProtocol;
     private final boolean enabled;
     private final Sender sender;
     private Stage stage = Stage.NEW;
@@ -36,9 +37,12 @@ final class BedrockRedirectSession {
     BedrockRedirectSession(String targetHost, int targetPort, String gameVersion,
                            boolean enabled, Sender sender) {
         this.targetHost = Objects.requireNonNull(targetHost);
+        if (targetHost.isBlank()) throw new IllegalArgumentException("target.host cannot be blank");
+        if (targetPort < 1 || targetPort > 65535) throw new IllegalArgumentException("target.port is invalid");
         this.targetPort = targetPort;
-        this.gameVersion = Objects.requireNonNull(gameVersion);
+        this.gameVersion = Objects.requireNonNull(gameVersion).trim();
         this.enabled = enabled;
+        this.configuredProtocol = enabled ? BedrockProtocolVersions.requireProtocol(this.gameVersion) : -1;
         this.sender = Objects.requireNonNull(sender);
     }
 
@@ -63,28 +67,29 @@ final class BedrockRedirectSession {
             protocolVersion = requested;
             System.out.println("[Bedrock] Client requested protocol " + requested);
             if (!enabled) return;
-            if (requested != BedrockRedirectProtocol.SUPPORTED_PROTOCOL) {
-                System.err.println("[Bedrock] Redirect bootstrap supports protocol " +
-                        BedrockRedirectProtocol.SUPPORTED_PROTOCOL + " only; client requested " + requested);
+            if (requested != configuredProtocol) {
+                System.err.println("[Bedrock] Redirect configured for " + gameVersion +
+                        " / protocol " + configuredProtocol + "; client requested " + requested +
+                        ". No handshake response will be sent.");
                 return;
             }
 
-            // NetworkSettings itself is sent using the pre-negotiation shape.
+            // NetworkSettings itself is sent using the pre-negotiation batch shape.
             sendPacket(BedrockRedirectProtocol.networkSettingsNone(), false);
             compressionNegotiated = true;
             stage = Stage.NETWORK_SETTINGS_SENT;
-            System.out.println("[Bedrock] NetworkSettings sent with Compression::None");
+            System.out.println("[Bedrock] NetworkSettings sent with Compression::None for protocol " + configuredProtocol);
             return;
         }
 
-        if (!enabled || protocolVersion != BedrockRedirectProtocol.SUPPORTED_PROTOCOL) return;
+        if (!enabled || protocolVersion != configuredProtocol) return;
 
         if (packetId == BedrockRedirectProtocol.LOGIN && stage == Stage.NETWORK_SETTINGS_SENT) {
             sendPackets(List.of(
                     BedrockRedirectProtocol.playStatusLoginSuccess(),
                     BedrockRedirectProtocol.emptyResourcePacksInfo()), true);
             stage = Stage.LOGIN_ACCEPTED;
-            System.out.println("[Bedrock] Login accepted; empty resource-pack negotiation started");
+            System.out.println("[Bedrock] Login received; redirect-only resource-pack negotiation started");
             return;
         }
 
@@ -107,16 +112,17 @@ final class BedrockRedirectSession {
         }
     }
 
-    private void sendPacket(byte[] packet, boolean compressedPhase) throws Exception {
-        sender.send(BedrockBatchCodec.encodeSingle(packet, marker, compressedPhase));
+    private void sendPacket(byte[] packet, boolean postNegotiation) throws Exception {
+        sender.send(BedrockBatchCodec.encodeSingle(packet, marker, postNegotiation));
     }
 
-    private void sendPackets(List<byte[]> packets, boolean compressedPhase) throws Exception {
-        sender.send(BedrockBatchCodec.encode(packets, marker, compressedPhase));
+    private void sendPackets(List<byte[]> packets, boolean postNegotiation) throws Exception {
+        sender.send(BedrockBatchCodec.encode(packets, marker, postNegotiation));
     }
 
     synchronized Stage stage() { return stage; }
     synchronized int protocolVersion() { return protocolVersion; }
+    synchronized int configuredProtocol() { return configuredProtocol; }
     synchronized boolean compressionNegotiated() { return compressionNegotiated; }
 
     private BedrockRedirectSession() { throw new AssertionError(); }
