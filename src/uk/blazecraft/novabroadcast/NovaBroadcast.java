@@ -59,7 +59,9 @@ public final class NovaBroadcast {
             if (!xbox.gamertag().isBlank()) System.out.println("[Xbox] Gamertag: " + xbox.gamertag());
             if (!xbox.xuid().isBlank()) System.out.println("[Xbox] XUID: " + xbox.xuid());
 
-            if (Arrays.asList(args).contains("--dump-activities") || Arrays.asList(args).contains("--discover-session")) {
+            boolean dumpActivities = Arrays.asList(args).contains("--dump-activities");
+            boolean discoverSession = Arrays.asList(args).contains("--discover-session");
+            if (dumpActivities || discoverSession) {
                 Path current = Path.of("data/mpsd-activities.json");
                 Path previous = Path.of("data/mpsd-activities-previous.json");
                 if (Files.isRegularFile(current)) {
@@ -70,8 +72,15 @@ public final class NovaBroadcast {
                 SessionDirectoryClient sessions = new SessionDirectoryClient(xbox);
                 sessions.dumpOwnActivities(current);
                 System.out.println("[NovaBroadcast] Activity discovery complete. No session was created or modified.");
-                if (Arrays.asList(args).contains("--discover-session")) prepareActivityImport();
-                if (Files.isRegularFile(previous)) {
+                if (discoverSession) {
+                    prepareActivityImport();
+                    if (Files.isRegularFile(previous)) {
+                        ActivityDiff.run(previous, current, Path.of("data/activity-diff.txt"));
+                        System.out.println("[NovaBroadcast] Consecutive discovery comparison completed automatically.");
+                    } else {
+                        System.out.println("[NovaBroadcast] First discovery saved. Run --discover-session again during another Minecraft activity to generate a diff.");
+                    }
+                } else if (Files.isRegularFile(previous)) {
                     System.out.println("[NovaBroadcast] Compare the last two captures with --diff-last-activities.");
                 }
                 return;
