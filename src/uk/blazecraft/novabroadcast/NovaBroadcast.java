@@ -30,6 +30,11 @@ public final class NovaBroadcast {
                 diffActivities(args);
                 return;
             }
+            if (Arrays.asList(args).contains("--diff-last-activities")) {
+                ActivityDiff.run(Path.of("data/mpsd-activities-previous.json"),
+                        Path.of("data/mpsd-activities.json"), Path.of("data/activity-diff.txt"));
+                return;
+            }
 
             System.out.println("NovaBroadcast " + VERSION);
             System.out.println("Independent Java implementation - no MCXboxBroadcast runtime/source dependency.");
@@ -54,10 +59,20 @@ public final class NovaBroadcast {
             if (!xbox.xuid().isBlank()) System.out.println("[Xbox] XUID: " + xbox.xuid());
 
             if (Arrays.asList(args).contains("--dump-activities") || Arrays.asList(args).contains("--discover-session")) {
+                Path current = Path.of("data/mpsd-activities.json");
+                Path previous = Path.of("data/mpsd-activities-previous.json");
+                if (Files.isRegularFile(current)) {
+                    Files.createDirectories(previous.toAbsolutePath().getParent());
+                    Files.copy(current, previous, StandardCopyOption.REPLACE_EXISTING);
+                    System.out.println("[Session] Preserved previous activity dump at " + previous.toAbsolutePath());
+                }
                 SessionDirectoryClient sessions = new SessionDirectoryClient(xbox);
-                sessions.dumpOwnActivities(Path.of("data/mpsd-activities.json"));
+                sessions.dumpOwnActivities(current);
                 System.out.println("[NovaBroadcast] Activity discovery complete. No session was created or modified.");
                 if (Arrays.asList(args).contains("--discover-session")) prepareActivityImport();
+                if (Files.isRegularFile(previous)) {
+                    System.out.println("[NovaBroadcast] Compare the last two captures with --diff-last-activities.");
+                }
                 return;
             }
 
