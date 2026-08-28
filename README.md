@@ -1,4 +1,4 @@
-# NovaBroadcast Clean-Room v0.4
+# NovaBroadcast Clean-Room v0.5
 
 NovaBroadcast is an independent Java implementation and does **not** include,
 download, compile, shade, or launch MCXboxBroadcast/Broadcaster source or JARs.
@@ -13,22 +13,24 @@ Current milestone:
 - native answering-side WebRTC via the general-purpose Apache-2.0 `webrtc-java` library
 - headless ICE/DTLS/SCTP peer operation with incoming/outbound data channels
 - persistent P-384 NetherNet operator identity
-- client `a=identity` stripping before native WebRTC SDP parsing
-- Minecraft OpenID discovery for current client signing keys
-- GameServerToken signature, issuer, audience, expiry/not-before, `cpk`, and detached fingerprint-proof validation
-- self-signed ES384 server identity JWT plus detached JWS over DTLS fingerprints
+- Minecraft OpenID discovery and GameServerToken/fingerprint-proof validation before WebRTC allocation
 - signed server `a=identity` insertion into every SDP answer
 - fixed configurable ICE UDP port range for container/Pterodactyl deployments
-- version-aware Bedrock `TransferPacket` encoder boundary
-- conservative live Bedrock wire inspection for direct and exact-length-prefixed packet shapes
-- Java 21 CI, protocol/identity self-tests, exact transfer-byte tests, and native WebRTC smoke test
+- protocol-2168 Bedrock batch framing with the pre/post-NetworkSettings boundary
+- guarded redirect-only Bedrock login/resource-pack bootstrap
+- version-aware `TransferPacket` encoder and automatic transfer at the completed resource-pack boundary
+- Java 21 CI, protocol/identity/redirect self-tests, exact packet-byte tests, and native WebRTC smoke test
 
-v0.4 can create a real WebRTC answering peer, gather ICE, authenticate a client
-assertion when present, sign the final answer with the server identity required by
-Minecraft, and exchange framed binary application data over the two NetherNet
-data channels. It still deliberately does **not** publish a Minecraft/Xbox
-joinable MPSD session until the remaining Minecraft-specific session metadata and
-Bedrock connection-state handling are established.
+v0.5 can create a real WebRTC answering peer, authenticate/sign the NetherNet
+identity exchange, accept Bedrock application traffic, negotiate Bedrock network
+settings using `Compression::None`, perform the minimum unencrypted login and
+empty resource-pack exchange, then send `TransferPacket` instead of constructing
+a world. The redirect flow is **disabled by default** and currently restricted
+to explicitly mapped protocol-2168 game versions.
+
+It still deliberately does **not** publish a Minecraft/Xbox joinable MPSD session
+until the remaining Minecraft-specific session-advertisement metadata is known
+and verified. The clean-room project does not guess Retail SCIDs/templates.
 
 ## Build and test
 
@@ -42,14 +44,12 @@ Output:
 
     NovaBroadcast.jar
 
-The build uses `dev.onvoid.webrtc:webrtc-java:0.14.0`, which supplies the
-platform WebRTC JNI implementation. GitHub Actions verifies normal protocol
-logic, identity persistence/signing, and that the native WebRTC factory loads
-from the packaged JAR.
+The build uses `dev.onvoid.webrtc:webrtc-java:0.14.0`. GitHub Actions verifies
+normal protocol logic, redirect guards, identity persistence/signing, and native
+WebRTC initialization from the packaged JAR.
 
-On Debian/Ubuntu Linux, the JNI library is dynamically linked to PulseAudio even
-though NovaBroadcast uses WebRTC's dummy audio layer. Install the small runtime
-library; no PulseAudio daemon or real audio device is required:
+On Debian/Ubuntu Linux the JNI library requires the PulseAudio runtime library,
+even though NovaBroadcast uses WebRTC's dummy audio device:
 
     apt-get update && apt-get install -y --no-install-recommends libpulse0
 
@@ -61,7 +61,14 @@ On first launch `config.properties` is created. Set `microsoft.clientId` to an
 application/client ID authorized for the Xbox Live scopes used by the account
 flow. Tokens are cached in `data/auth.properties`.
 
-Example transport configuration:
+Example transport/redirect configuration:
+
+    target.host=54.37.245.44
+    target.port=19133
+    target.name=NovaCraft
+
+    bedrock.redirectEnabled=false
+    bedrock.gameVersion=1.26.44
 
     nethernet.enabled=true
     nethernet.listenHost=0.0.0.0
@@ -78,14 +85,12 @@ Example transport configuration:
     nethernet.iceMinPort=20000
     nethernet.iceMaxPort=20100
 
-The signaling TCP port and configured ICE UDP range must be reachable from
-outside the container. On Pterodactyl, allocate/map the UDP range before testing
-real Bedrock connections.
+The signaling TCP port and configured ICE UDP range must be reachable externally.
+On Pterodactyl, allocate/map the UDP range before testing real Bedrock clients.
 
 `nethernet.identityKey` is generated automatically on first use and must remain
 private and stable. Minecraft's plaintext-signaling TOFU trust is attached to
-this operator key, so deleting or replacing it makes the server appear as a new
-operator to clients.
+this operator key.
 
 ## Minecraft client authentication
 
@@ -93,74 +98,62 @@ NovaBroadcast uses the configured issuer's OpenID Connect discovery document:
 
     https://authorization.franchise.minecraft-services.net/.well-known/openid-configuration
 
-The document supplies the expected issuer and current `jwks_uri`; the JWKS is
-then cached by the lower-level verifier and refreshed when a token references an
-unknown key ID. `nethernet.clientJwksUrl` is only an override for alternate/test
-environments and normally stays blank.
+The discovery document supplies the issuer and current `jwks_uri`. For a client
+`a=identity`, NovaBroadcast validates the GameServerToken signature and time
+claims, multiplayer audience, P-384 `cpk`, IdP domain, and detached ES384 proof
+over the offer's DTLS fingerprints. Invalid assertions are rejected with HTTP
+403 before ICE/DTLS/SCTP state is allocated.
 
-For a client `a=identity`, NovaBroadcast verifies:
-1. the envelope and `idp.protocol=default`,
-2. the GameServerToken signature using the discovered signing key,
-3. `exp` and `nbf`,
-4. the token `iss` against the discovered issuer,
-5. the multiplayer `aud`,
-6. that the SDP identity-provider domain matches the token issuer,
-7. the P-384 `cpk` embedded in the token, and
-8. the detached ES384 signature over the offer's DTLS fingerprints.
+`nethernet.requireClientIdentity=false` permits identityless development offers;
+any assertion that is present is still verified. Set it to `true` for
+authenticated-only admission.
 
-Authentication occurs before any ICE/DTLS/SCTP peer is allocated. Invalid
-assertions are rejected at signaling time with HTTP 403. With
-`nethernet.requireClientIdentity=false`, identityless offers may still be used
-for development; assertions that are present are always verified. Set it to
-`true` for authenticated-only operation.
+## Bedrock redirect bootstrap
 
-When an authenticated SDP offer is accepted, NovaBroadcast:
-1. removes the client's session-level `a=identity` before native WebRTC parsing,
-2. creates a headless native WebRTC peer and applies the cleaned offer,
-3. creates/sets an answer and waits for ICE gathering,
-4. self-signs a server JWT containing the long-lived public `cpk`,
-5. signs the answer's DTLS fingerprints with a detached ES384 JWS,
-6. inserts the resulting `a=identity` before the first media section,
-7. returns the signed SDP answer,
-8. accepts `ReliableDataChannel` / `UnreliableDataChannel`, and
-9. reassembles/inspects recovered application payloads without mutating them.
+The redirect implementation is intentionally small rather than a fake Bedrock
+world server. For a supported protocol-2168 client it performs:
 
-Outbound application payloads can also be sent through the same channels.
-Reliable payloads are fragmented according to NetherNet countdown framing;
-oversized unreliable payloads are dropped instead of fragmented.
+1. client `RequestNetworkSettings` (packet 193),
+2. server `NetworkSettings` (143) using compression algorithm `NONE`,
+3. client `Login` (1),
+4. server `PlayStatus(LoginSuccess)` (2) plus empty `ResourcePacksInfo` (6),
+5. client resource-pack response `HAVE_ALL_PACKS`,
+6. server empty `ResourcePackStack` (7),
+7. client resource-pack response `COMPLETED`, and
+8. server `TransferPacket` (85) to `target.host:target.port`.
 
-## Bedrock transfer boundary
+Bedrock's encryption handshake is not enabled by this redirect-only bootstrap;
+encryption is optional in the normal login flow, so the bridge can reach the
+transfer boundary without inventing a world, chunks, entity state, or StartGame
+payload.
 
-NovaBroadcast contains a small independent `TransferPacket` encoder. For current
-protocols it encodes packet ID 85, a VarUInt-length UTF-8 server address, a
-little-endian uint16 port, the reload-world flag, and the optional gatherings
-presence marker introduced at protocol 2168. The exact byte layout is covered by
-`--self-test`.
+`NetworkSettings` and the later game batches are distinct wire phases. The
+NetworkSettings algorithm field uses enum value 2 for `NONE`; after negotiation,
+the per-batch method prefix for `NONE` is `0xFF`. NovaBroadcast models and tests
+that boundary explicitly, including optional `0xFE` game-packet markers and
+VarUInt packet lengths.
 
-The encoder is intentionally **not auto-injected yet**. A correct packet still
-has to be sent at the correct Bedrock connection state and with whatever packet
-length, compression, or encryption envelope the active client session expects.
-
-Incoming application payloads are inspected conservatively. NovaBroadcast logs
-a packet ID/sub-client header only when the bytes structurally match either a
-direct Bedrock packet or an exact VarUInt-length-prefixed packet. Unknown or
-enveloped payloads remain untouched and are reported as such.
+`bedrock.redirectEnabled=false` is the safe default and emits no Bedrock handshake
+responses. When enabled, the configured game version must map to a tested
+protocol; currently the 1.26.40/1.26.43/1.26.44 family maps to protocol 2168.
+A mismatched client gets no fabricated compatibility response.
 
 ## MPSD safety
 
 `session.scid` and `session.template` must be explicit title-authorized values.
 NovaBroadcast does not embed guessed Minecraft Retail identifiers.
 
-`session.writeEnabled=false` remains the safe default. The project continues to
-refuse to publish an unreachable or incorrectly-described Xbox session while the
-remaining Minecraft-specific session work is unfinished.
+`session.writeEnabled=false` remains the safe default. Even though the transport
+and redirect bootstrap now exist, the project still refuses to publish a
+joinable Xbox session until the title-specific MPSD discovery properties are
+verified from legitimate configuration/documentation.
 
 ## Source provenance
 
 All NovaBroadcast Java sources were written for this project. The WebRTC engine
 is consumed as an ordinary general-purpose Apache-2.0 Maven dependency; no
 broadcaster-specific implementation is copied or used at runtime. Public service
-endpoint names, signaling shapes, identity rules, and framing are based on
-public Microsoft/Xbox and Mojang Bedrock documentation. Independent protocol
+endpoint names, signaling shapes, identity rules, and Bedrock packet layouts are
+based on public Microsoft/Xbox and Mojang documentation. Independent protocol
 libraries/specifications are used only as interoperability cross-checks where
 public Mojang documentation does not specify an inner transport detail.
