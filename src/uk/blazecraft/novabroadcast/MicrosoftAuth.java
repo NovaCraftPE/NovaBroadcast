@@ -1,7 +1,9 @@
 package uk.blazecraft.novabroadcast;
 
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
+import com.sun.net.httpserver.HttpExchange;
+import com.sun.net.httpserver.HttpServer;
+import java.io.IOException;
+import java.net.InetSocketAddress;
 import java.net.URI;
 import java.net.URLDecoder;
 import java.net.URLEncoder;
@@ -10,6 +12,8 @@ import java.security.SecureRandom;
 import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.TimeUnit;
 
 final class MicrosoftAuth {
     private final AppConfig config;
@@ -50,7 +54,11 @@ final class MicrosoftAuth {
             throw new IllegalStateException("Microsoft client secret is not configured. Create one in Entra App registrations > NovaBroadcast > Certificates & secrets, then set microsoft.clientSecret.");
         }
         if (config.redirectUri().isBlank()) {
-            throw new IllegalStateException("Microsoft redirect URI is not configured. Add a Web redirect URI to the Entra app and set the exact same value as microsoft.redirectUri.");
+            throw new IllegalStateException("Microsoft redirect URI is not configured. Register a public HTTPS Web redirect URI on the Entra app and set the exact same value as microsoft.redirectUri.");
+        }
+        URI redirect = URI.create(config.redirectUri());
+        if (redirect.getPath() == null || redirect.getPath().isBlank() || "/".equals(redirect.getPath())) {
+            throw new IllegalStateException("microsoft.redirectUri must include a callback path, for example https://auth.example.com/microsoft/callback");
         }
         if (!"consumers".equalsIgnoreCase(config.tenant())) {
             System.out.println("[Auth] WARN Xbox website sign-in is documented against the consumers tenant; configured tenant is '" + config.tenant() + "'.");
@@ -84,46 +92,86 @@ final class MicrosoftAuth {
                 "state", state
         ));
 
-        System.out.println("[Auth] Xbox browser authorization is required.");
-        System.out.println("[Auth] Open this URL in a browser and sign in with the Microsoft/Xbox account:");
-        System.out.println(authorizeUrl);
-        System.out.println("[Auth] After Microsoft redirects you, paste the FULL redirected URL here (or paste only the code= value):");
+        URI redirect = URI.create(config.redirectUri());
+        String callbackPath = redirect.getPath();
+        ArrayBlockingQueue<AuthorizationResponse> responses = new ArrayBlockingQueue<>(1);
+        HttpServer callbackServer = HttpServer.create(
+                new InetSocketAddress(config.microsoftCallbackListenHost(), config.microsoftCallbackListenPort()), 0);
+        callbackServer.createContext(callbackPath, exchange -> handleCallback(exchange, responses));
+        callbackServer.setExecutor(null);
+        callbackServer.start();
 
-        BufferedReader in = new BufferedReader(new InputStreamReader(System.in, StandardCharsets.UTF_8));
-        String pasted = in.readLine();
-        if (pasted == null || pasted.isBlank()) {
-            throw new IllegalStateException("No Microsoft authorization response was entered.");
+        try {
+            System.out.println("[Auth] Microsoft callback listener is ready on " +
+                    config.microsoftCallbackListenHost() + ":" + config.microsoftCallbackListenPort() + callbackPath);
+            System.out.println("[Auth] Public redirect URI: " + config.redirectUri());
+            System.out.println("[Auth] Open this URL in a browser and sign in with the Microsoft/Xbox account:");
+            System.out.println(authorizeUrl);
+            System.out.println("[Auth] Waiting up to " + config.microsoftCallbackTimeoutSeconds() + " seconds for Microsoft to redirect back automatically...");
+
+            AuthorizationResponse ar = responses.poll(config.microsoftCallbackTimeoutSeconds(), TimeUnit.SECONDS);
+            if (ar == null) {
+                throw new IllegalStateException("Timed out waiting for the Microsoft callback. Verify the public redirect URI reaches this server and is registered exactly in Entra.");
+            }
+            if (!ar.state().isBlank() && !state.equals(ar.state())) {
+                throw new IllegalStateException("Microsoft authorization state mismatch; restart sign-in and use the newly printed URL.");
+            }
+            if (!ar.error().isBlank()) {
+                throw new IllegalStateException("Microsoft authorization failed: " + ar.error() +
+                        (ar.errorDescription().isBlank() ? "" : " - " + ar.errorDescription()));
+            }
+            if (ar.code().isBlank()) {
+                throw new IllegalStateException("The Microsoft callback did not contain an authorization code.");
+            }
+
+            Map<String,String> fields = new LinkedHashMap<>();
+            fields.put("client_id", config.clientId());
+            fields.put("client_secret", config.clientSecret());
+            fields.put("code", ar.code());
+            fields.put("redirect_uri", config.redirectUri());
+            fields.put("grant_type", "authorization_code");
+            fields.put("scope", config.scope());
+
+            Http.Response tr = Http.post(oauthBase() + "/token", Form.encode(fields),
+                    Map.of("Content-Type","application/x-www-form-urlencoded"));
+            if (!tr.ok()) {
+                String error = Json.string(tr.body(), "error");
+                String desc = Json.string(tr.body(), "error_description");
+                throw new IllegalStateException("Microsoft authorization-code exchange failed: HTTP " + tr.status() +
+                        (error.isBlank() ? "" : " - " + error) + (desc.isBlank() ? "" : " - " + desc));
+            }
+            System.out.println("[Auth] Microsoft authorization callback received successfully.");
+            return tokenResponse(tr.body(), "");
+        } finally {
+            callbackServer.stop(0);
+        }
+    }
+
+    private static void handleCallback(HttpExchange exchange, ArrayBlockingQueue<AuthorizationResponse> responses) throws IOException {
+        AuthorizationResponse ar;
+        try {
+            String rawQuery = exchange.getRequestURI().getRawQuery();
+            Map<String,String> values = parseQuery(rawQuery == null ? "" : rawQuery);
+            ar = new AuthorizationResponse(
+                    values.getOrDefault("code", ""),
+                    values.getOrDefault("state", ""),
+                    values.getOrDefault("error", ""),
+                    values.getOrDefault("error_description", ""));
+        } catch (Exception e) {
+            ar = new AuthorizationResponse("", "", "invalid_callback", e.getMessage() == null ? "Invalid callback" : e.getMessage());
         }
 
-        AuthorizationResponse ar = parseAuthorizationResponse(pasted.trim());
-        if (!ar.state().isBlank() && !state.equals(ar.state())) {
-            throw new IllegalStateException("Microsoft authorization state mismatch; restart sign-in and use the newly printed URL.");
-        }
-        if (!ar.error().isBlank()) {
-            throw new IllegalStateException("Microsoft authorization failed: " + ar.error() +
-                    (ar.errorDescription().isBlank() ? "" : " - " + ar.errorDescription()));
-        }
-        if (ar.code().isBlank()) {
-            throw new IllegalStateException("The pasted Microsoft response did not contain an authorization code.");
-        }
-
-        Map<String,String> fields = new LinkedHashMap<>();
-        fields.put("client_id", config.clientId());
-        fields.put("client_secret", config.clientSecret());
-        fields.put("code", ar.code());
-        fields.put("redirect_uri", config.redirectUri());
-        fields.put("grant_type", "authorization_code");
-        fields.put("scope", config.scope());
-
-        Http.Response tr = Http.post(oauthBase() + "/token", Form.encode(fields),
-                Map.of("Content-Type","application/x-www-form-urlencoded"));
-        if (!tr.ok()) {
-            String error = Json.string(tr.body(), "error");
-            String desc = Json.string(tr.body(), "error_description");
-            throw new IllegalStateException("Microsoft authorization-code exchange failed: HTTP " + tr.status() +
-                    (error.isBlank() ? "" : " - " + error) + (desc.isBlank() ? "" : " - " + desc));
-        }
-        return tokenResponse(tr.body(), "");
+        responses.offer(ar);
+        String body = """
+<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>NovaBroadcast</title></head>
+<body style="font-family:system-ui;padding:32px;max-width:680px;margin:auto"><h1>NovaBroadcast</h1><p>Microsoft sign-in has returned to the server. You can close this page and go back to the server console.</p></body></html>
+""";
+        byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+        exchange.getResponseHeaders().set("Content-Type", "text/html; charset=utf-8");
+        exchange.getResponseHeaders().set("Cache-Control", "no-store");
+        exchange.sendResponseHeaders(200, bytes.length);
+        exchange.getResponseBody().write(bytes);
+        exchange.close();
     }
 
     private String oauthBase() {
@@ -139,28 +187,9 @@ final class MicrosoftAuth {
         return new MicrosoftTokens(access, refresh, System.currentTimeMillis()/1000L + expires);
     }
 
-    private static AuthorizationResponse parseAuthorizationResponse(String pasted) {
-        if (!pasted.contains("://") && !pasted.contains("?") && !pasted.contains("&")) {
-            return new AuthorizationResponse(pasted, "", "", "");
-        }
-        String query = pasted;
-        try {
-            URI uri = URI.create(pasted);
-            if (uri.getRawQuery() != null) query = uri.getRawQuery();
-        } catch (Exception ignored) {
-            int q = pasted.indexOf('?');
-            if (q >= 0) query = pasted.substring(q + 1);
-        }
-        Map<String,String> values = parseQuery(query);
-        return new AuthorizationResponse(
-                values.getOrDefault("code", ""),
-                values.getOrDefault("state", ""),
-                values.getOrDefault("error", ""),
-                values.getOrDefault("error_description", ""));
-    }
-
     private static Map<String,String> parseQuery(String query) {
         Map<String,String> out = new LinkedHashMap<>();
+        if (query == null || query.isBlank()) return out;
         for (String part : query.split("&")) {
             int eq = part.indexOf('=');
             String k = eq < 0 ? part : part.substring(0, eq);
