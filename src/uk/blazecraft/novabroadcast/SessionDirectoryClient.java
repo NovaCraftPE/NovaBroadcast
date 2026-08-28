@@ -17,6 +17,27 @@ final class SessionDirectoryClient {
         this.identity = identity;
     }
 
+    /** Read-only MPSD readiness check. Never creates, updates, joins, leaves or binds a session. */
+    void preflightOnly(AppConfig config) throws Exception {
+        requireConfigured(config);
+        TemplateInfo template = validateTemplate(config);
+        String sessionCustom = readJsonObject(config.sessionCustomPropertiesFile(), "session custom properties");
+        String memberCustom = readJsonObject(config.sessionMemberCustomPropertiesFile(), "member custom properties");
+        SessionDocument.activeMember(identity, sessionCustom, memberCustom);
+
+        System.out.println("[LivePreflight] MPSD template reachable.");
+        System.out.println("[LivePreflight] Template visibility=" + template.visibility() +
+                " connectivity=" + template.connectivity() + " gameplay=" + template.gameplay());
+        if (!template.connectivity()) {
+            throw new IllegalStateException("[LivePreflight] FAIL selected MPSD template does not advertise connectivity capability.");
+        }
+        if (config.sessionCustomPropertiesFile().isBlank()) {
+            System.out.println("[LivePreflight] WARN no session.customPropertiesFile is configured yet; live publication remains intentionally blocked.");
+        } else {
+            System.out.println("[LivePreflight] Session custom-property JSON is present and parseable.");
+        }
+    }
+
     /**
      * Starts the configured MPSD lifecycle and returns true only when this
      * process actually published a live session member that must later leave.
@@ -69,8 +90,6 @@ final class SessionDirectoryClient {
         if (config.sessionSetActivity()) {
             Http.Response activity = setActivity(config);
             if (!activity.ok()) {
-                // The member exists now, so best-effort leave before surfacing the
-                // activity failure. This prevents an orphaned active member.
                 try { leavePublishedSession(config); }
                 catch (Exception cleanup) {
                     System.err.println("[Session] Cleanup after activity failure also failed: " + cleanup.getMessage());
@@ -84,7 +103,7 @@ final class SessionDirectoryClient {
         return true;
     }
 
-    void dumpOwnActivities(Path output) throws Exception {
+    String ownActivities() throws Exception {
         if (identity.xuid() == null || identity.xuid().isBlank()) {
             throw new IllegalStateException("Xbox identity does not contain an XUID.");
         }
@@ -93,12 +112,16 @@ final class SessionDirectoryClient {
                 "&private=true&inactive=true&reservations=true&take=100";
         Http.Response response = Http.post(url, "{\"type\":\"activity\"}", writeHeaders());
         response.requireOk("MPSD own-activity query");
+        return response.body();
+    }
 
+    void dumpOwnActivities(Path output) throws Exception {
+        String body = ownActivities();
         Path parent = output.toAbsolutePath().getParent();
         if (parent != null) Files.createDirectories(parent);
-        Files.writeString(output, response.body(), StandardCharsets.UTF_8);
+        Files.writeString(output, body, StandardCharsets.UTF_8);
         System.out.println("[Session] Saved authenticated activity dump to " + output.toAbsolutePath());
-        printActivitySummary(response.body());
+        printActivitySummary(body);
     }
 
     Http.Response create(AppConfig config, String document) throws Exception {
@@ -150,7 +173,7 @@ final class SessionDirectoryClient {
         return results instanceof List<?> list ? list.size() : 0;
     }
 
-    private static void printActivitySummary(String json) {
+    static void printActivitySummary(String json) {
         Object root = Json.parse(json);
         if (!(root instanceof Map<?,?> map) || !(map.get("results") instanceof List<?> results)) {
             System.out.println("[Session] Activity query returned no parseable results array.");
