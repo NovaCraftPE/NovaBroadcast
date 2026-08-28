@@ -30,7 +30,9 @@ record AppConfig(
         boolean netherNetRequireClientIdentity,
         String netherNetClientIssuer,
         String netherNetClientAudience,
-        String netherNetClientJwksUrl) {
+        String netherNetClientJwksUrl,
+        boolean bedrockRedirectEnabled,
+        String bedrockGameVersion) {
 
     static AppConfig load(Path path) throws IOException {
         if (!Files.exists(path)) Files.writeString(path, DefaultConfig.TEXT);
@@ -67,7 +69,9 @@ record AppConfig(
                 Boolean.parseBoolean(p.getProperty("nethernet.requireClientIdentity", "false")),
                 p.getProperty("nethernet.clientIssuer", MinecraftClientIdentityVerifier.DEFAULT_ISSUER).trim(),
                 p.getProperty("nethernet.clientAudience", MinecraftClientIdentityVerifier.DEFAULT_AUDIENCE).trim(),
-                p.getProperty("nethernet.clientJwksUrl", "").trim()
+                p.getProperty("nethernet.clientJwksUrl", "").trim(),
+                Boolean.parseBoolean(p.getProperty("bedrock.redirectEnabled", "false")),
+                p.getProperty("bedrock.gameVersion", "1.26.44").trim()
         );
     }
 
@@ -96,9 +100,15 @@ microsoft.clientId=
 microsoft.scope=XboxLive.signin XboxLive.offline_access
 microsoft.tenant=consumers
 xbox.relyingParty=http://xboxlive.com
+
 target.host=54.37.245.44
 target.port=19133
 target.name=NovaCraft
+
+# Bedrock redirect bootstrap. Leave disabled until NetherNet signaling is
+# reachable and you are ready to test a real 1.26.44 / protocol-2168 client.
+bedrock.redirectEnabled=false
+bedrock.gameVersion=1.26.44
 
 # Xbox Multiplayer Session Directory (MPSD)
 session.enabled=false
