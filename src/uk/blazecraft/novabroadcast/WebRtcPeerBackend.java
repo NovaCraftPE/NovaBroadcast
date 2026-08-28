@@ -50,7 +50,6 @@ final class WebRtcPeerBackend implements NetherNetSignalingServer.PeerBackend, A
         NetherNetIdentity.Offer offer = NetherNetIdentity.stripClientIdentity(offerSdp);
         authenticateClient(networkId, offerSdp, offer);
 
-        // Authentication happens before allocating ICE/DTLS/SCTP state.
         Peer replacement = new Peer(networkId);
         Peer old = peers.put(networkId, replacement);
         if (old != null) old.close();
@@ -66,13 +65,10 @@ final class WebRtcPeerBackend implements NetherNetSignalingServer.PeerBackend, A
     private void authenticateClient(String networkId, String originalOffer,
                                     NetherNetIdentity.Offer offer) throws Exception {
         if (!offer.hasIdentity()) {
-            if (config.netherNetRequireClientIdentity()) {
-                throw new SecurityException("Client identity is required");
-            }
+            if (config.netherNetRequireClientIdentity()) throw new SecurityException("Client identity is required");
             System.out.println("[NetherNet] Unauthenticated client offer for NetworkID " + networkId);
             return;
         }
-
         ClientIdentityVerifier.VerifiedClient client = clientVerifier.verify(originalOffer, offer.encodedIdentity());
         String xuid = firstNonBlank(client.xuid(), claim(client, "xid"));
         String uuid = firstNonBlank(client.uuid(), claim(client, "mid"), claim(client, "sub"));
@@ -87,7 +83,6 @@ final class WebRtcPeerBackend implements NetherNetSignalingServer.PeerBackend, A
         Object value = client.claims().get(key);
         return value == null ? "" : String.valueOf(value);
     }
-
     private static String firstNonBlank(String... values) {
         for (String value : values) if (value != null && !value.isBlank()) return value;
         return "";
@@ -95,7 +90,6 @@ final class WebRtcPeerBackend implements NetherNetSignalingServer.PeerBackend, A
 
     void sendReliable(String networkId, byte[] payload) throws Exception { requirePeer(networkId).sendReliable(payload); }
     boolean sendUnreliable(String networkId, byte[] payload) throws Exception { return requirePeer(networkId).sendUnreliable(payload); }
-
     private Peer requirePeer(String networkId) {
         Peer peer = peers.get(networkId);
         if (peer == null) throw new IllegalStateException("No active WebRTC peer for NetworkID " + networkId);
@@ -133,6 +127,7 @@ final class WebRtcPeerBackend implements NetherNetSignalingServer.PeerBackend, A
         private volatile RTCDataChannel reliable;
         private volatile RTCDataChannel unreliable;
         private volatile boolean peerClosed;
+        private volatile boolean networkSettingsSent;
 
         Peer(String networkId) {
             this.networkId = networkId;
@@ -144,13 +139,9 @@ final class WebRtcPeerBackend implements NetherNetSignalingServer.PeerBackend, A
             await(setRemote(new RTCSessionDescription(RTCSdpType.OFFER, cleanOfferSdp)), SDP_TIMEOUT, "set remote SDP");
             RTCSessionDescription answer = await(createAnswer(), SDP_TIMEOUT, "create SDP answer");
             await(setLocal(answer), SDP_TIMEOUT, "set local SDP");
-            if (connection.getIceGatheringState() != RTCIceGatheringState.COMPLETE) {
-                await(iceComplete, ICE_TIMEOUT, "ICE candidate gathering");
-            }
+            if (connection.getIceGatheringState() != RTCIceGatheringState.COMPLETE) await(iceComplete, ICE_TIMEOUT, "ICE candidate gathering");
             RTCSessionDescription local = connection.getLocalDescription();
-            if (local == null || local.sdp == null || local.sdp.isBlank()) {
-                throw new IllegalStateException("WebRTC produced no local SDP answer");
-            }
+            if (local == null || local.sdp == null || local.sdp.isBlank()) throw new IllegalStateException("WebRTC produced no local SDP answer");
             String signedAnswer = identity.signAnswer(local.sdp);
             System.out.println("[NetherNet] Signed SDP answer ready for NetworkID " + networkId);
             return signedAnswer;
@@ -187,7 +178,6 @@ final class WebRtcPeerBackend implements NetherNetSignalingServer.PeerBackend, A
             });
             return result;
         }
-
         private CompletableFuture<Void> setRemote(RTCSessionDescription sdp) {
             CompletableFuture<Void> result = new CompletableFuture<>();
             connection.setRemoteDescription(sdp, setObserver(result, "setRemoteDescription"));
@@ -241,12 +231,25 @@ final class WebRtcPeerBackend implements NetherNetSignalingServer.PeerBackend, A
             }
 
             connectionTracker.observe(payload).ifPresent(observation -> {
-                String protocol = observation.requestedProtocol() == null ? "" :
-                        " protocol=" + observation.requestedProtocol();
+                String protocol = observation.requestedProtocol() == null ? "" : " protocol=" + observation.requestedProtocol();
                 System.out.println("[Bedrock] " + networkId + " stage=" + observation.stage() + protocol);
+
+                if (reliableChannel && observation.packetId() == BedrockConnectionTracker.REQUEST_NETWORK_SETTINGS && !networkSettingsSent) {
+                    if (inspection.isEmpty()) return;
+                    try {
+                        byte[] response = BedrockNetworkSettingsEncoder.matchWireShape(
+                                BedrockNetworkSettingsEncoder.encodeNoCompression(), inspection.get().shape());
+                        sendReliable(response);
+                        networkSettingsSent = true;
+                        System.out.println("[Bedrock] " + networkId + " sent NetworkSettings compression=None");
+                    } catch (Exception e) {
+                        System.err.println("[Bedrock] " + networkId + " failed to send NetworkSettings: " + e.getMessage());
+                    }
+                }
+
                 if (observation.stage() == BedrockConnectionTracker.Stage.CLIENT_INITIALIZED) {
                     System.out.println("[Bedrock] " + networkId +
-                            " reached client-initialized milestone; transfer remains guarded until server-side login/envelope handling is complete.");
+                            " reached client-initialized milestone; transfer remains guarded until login/encryption handling is complete.");
                 }
             });
         }
