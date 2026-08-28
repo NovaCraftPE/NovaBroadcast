@@ -14,7 +14,7 @@ import java.util.function.Consumer;
 final class MinecraftBedrockAuth {
     private static final Path CACHE = Path.of("data/minecraft-bedrock-auth.json");
 
-    record Result(XboxIdentity identity, String pmsgId) {}
+    record Result(XboxIdentity identity, String pmsgId, String minecraftAuthorizationHeader) {}
 
     XboxIdentity authenticate(String bedrockVersion) throws Exception {
         return authenticateDetailed(bedrockVersion).identity();
@@ -49,9 +49,6 @@ final class MinecraftBedrockAuth {
                     .login(DeviceCodeMsaAuthService::new, deviceCode);
         }
 
-        // Refresh the same token chain used by a Bedrock session before reading any
-        // Minecraft-session claims. A deserialized cache may have a stale/empty
-        // Minecraft session even while its Xbox XSTS token is still usable.
         var xsts = manager.getXboxLiveXstsToken().getUpToDate();
         manager.getPlayFabToken().getUpToDate();
         var minecraftSession = manager.getMinecraftSession().getUpToDate();
@@ -59,6 +56,11 @@ final class MinecraftBedrockAuth {
         String authorization = xsts.getAuthorizationHeader();
         if (authorization == null || authorization.isBlank()) {
             throw new IllegalStateException("Bedrock authentication returned an empty Xbox authorization header.");
+        }
+
+        String minecraftAuthorization = minecraftSession.getAuthorizationHeader();
+        if (minecraftAuthorization == null || minecraftAuthorization.isBlank()) {
+            throw new IllegalStateException("Minecraft session returned an empty MCToken authorization header.");
         }
 
         String pmsgId;
@@ -73,6 +75,7 @@ final class MinecraftBedrockAuth {
             throw new IllegalStateException("Fresh Minecraft session token returned an empty pmid claim.");
         }
         System.out.println("[BedrockAuth] Minecraft session pmid is available.");
+        System.out.println("[BedrockAuth] Minecraft signaling authorization is available (not printed).");
 
         Files.createDirectories(CACHE.toAbsolutePath().getParent());
         Files.writeString(CACHE, BedrockAuthManager.toJson(manager).toString());
@@ -95,6 +98,9 @@ final class MinecraftBedrockAuth {
         if (!gamertag.isBlank()) System.out.println("[BedrockAuth] Gamertag: " + gamertag);
         if (!xuid.isBlank()) System.out.println("[BedrockAuth] XUID: " + xuid);
 
-        return new Result(new XboxIdentity("", "", xuid, gamertag, authorization), pmsgId);
+        return new Result(
+                new XboxIdentity("", "", xuid, gamertag, authorization),
+                pmsgId,
+                minecraftAuthorization);
     }
 }
