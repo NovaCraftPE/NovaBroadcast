@@ -7,20 +7,24 @@ public final class NovaBroadcast {
     public static final String VERSION = "0.5-cleanroom";
 
     public static void main(String[] args) {
-        if (Arrays.asList(args).contains("--self-test")) {
-            SelfTest.run();
-            BedrockRedirectSelfTest.run();
-            return;
-        }
-        if (Arrays.asList(args).contains("--webrtc-smoke-test")) {
-            SelfTest.runNativeWebRtc();
-            return;
-        }
-
-        System.out.println("NovaBroadcast " + VERSION);
-        System.out.println("Independent Java implementation - no MCXboxBroadcast runtime/source dependency.");
-
         try {
+            if (Arrays.asList(args).contains("--self-test")) {
+                SelfTest.run();
+                BedrockRedirectSelfTest.run();
+                return;
+            }
+            if (Arrays.asList(args).contains("--webrtc-smoke-test")) {
+                SelfTest.runNativeWebRtc();
+                return;
+            }
+            if (Arrays.asList(args).contains("--config-check")) {
+                ConfigCheck.run(Path.of("config.properties"));
+                return;
+            }
+
+            System.out.println("NovaBroadcast " + VERSION);
+            System.out.println("Independent Java implementation - no MCXboxBroadcast runtime/source dependency.");
+
             AppConfig config = AppConfig.load(Path.of("config.properties"));
             if (config.clientId().isBlank()) {
                 System.out.println();
@@ -37,12 +41,8 @@ public final class NovaBroadcast {
             XboxIdentity xbox = xboxAuth.authenticate(msa.accessToken(), config.xboxRelyingParty());
 
             System.out.println("[Xbox] Authenticated.");
-            if (!xbox.gamertag().isBlank()) {
-                System.out.println("[Xbox] Gamertag: " + xbox.gamertag());
-            }
-            if (!xbox.xuid().isBlank()) {
-                System.out.println("[Xbox] XUID: " + xbox.xuid());
-            }
+            if (!xbox.gamertag().isBlank()) System.out.println("[Xbox] Gamertag: " + xbox.gamertag());
+            if (!xbox.xuid().isBlank()) System.out.println("[Xbox] XUID: " + xbox.xuid());
 
             try (NetherNetTransport transport = new NetherNetTransport()) {
                 transport.start(config);
@@ -68,9 +68,7 @@ public final class NovaBroadcast {
             System.out.println("[NovaBroadcast] Stopped.");
         } catch (Exception e) {
             System.err.println("[NovaBroadcast] " + e.getMessage());
-            if (Boolean.getBoolean("novabroadcast.debug")) {
-                e.printStackTrace();
-            }
+            if (Boolean.getBoolean("novabroadcast.debug")) e.printStackTrace();
             System.exit(1);
         }
     }
