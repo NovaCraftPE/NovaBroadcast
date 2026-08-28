@@ -14,6 +14,7 @@ public final class NovaBroadcast {
                 BedrockRedirectSelfTest.run();
                 ActivityDiffSelfTest.run();
                 BedrockTargetProbeSelfTest.run();
+                XboxPresenceSelfTest.run();
                 return;
             }
             if (Arrays.asList(args).contains("--webrtc-smoke-test")) {
@@ -140,13 +141,20 @@ public final class NovaBroadcast {
         }
         System.out.println("[LivePreflight] Target protocol matches configured redirect version.");
 
+        XboxPresenceClient.Presence presence = new XboxPresenceClient(xbox).read();
+        XboxPresenceClient.print(presence);
+        boolean activeTitle = presence.titles().stream().anyMatch(t -> "active".equalsIgnoreCase(t.state()));
+        if (!activeTitle) {
+            System.out.println("[LivePreflight] WARN Xbox Presence does not currently report an active title. Run the capture while Minecraft is genuinely active on the account.");
+        }
+
         SessionDirectoryClient sessions = new SessionDirectoryClient(xbox);
         String activities = sessions.ownActivities();
         System.out.println("[LivePreflight] Authenticated MPSD activity query succeeded; handles=" +
                 SessionDirectoryClient.activityCount(activities));
         SessionDirectoryClient.printActivitySummary(activities);
         sessions.preflightOnly(config);
-        System.out.println("[LivePreflight] PASS read-only checks completed. This does not prove Xbox Presence/title engagement or console joinability; those require the real Minecraft/Xbox test.");
+        System.out.println("[LivePreflight] PASS read-only checks completed. This does not prove console joinability; that final claim requires an actual Xbox/Bedrock join.");
     }
 
     private static void targetCheck() throws Exception {
