@@ -110,7 +110,8 @@ final class SessionDirectoryClient {
         String url = MPSD + "/handles/query?include=relatedinfo" +
                 "&xuid=" + encode(identity.xuid()) +
                 "&private=true&inactive=true&reservations=true&take=100";
-        Http.Response response = Http.post(url, "{\"type\":\"activity\"}", writeHeaders());
+        String query = "{\"type\":\"activity\",\"owners\":{\"xuids\":[" + Json.quote(identity.xuid()) + "]}}";
+        Http.Response response = Http.post(url, query, writeHeaders());
         response.requireOk("MPSD own-activity query");
         return response.body();
     }
