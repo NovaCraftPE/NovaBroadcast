@@ -8,7 +8,8 @@ final class BedrockRedirectSelfTest {
             testDisabledIsDiagnosticOnly();
             testProtocolMismatchIsRejected();
             testMalformedLoginIsRejected();
-            test2168RedirectFlow();
+            testRedirectFlow("1.26.44", 2168);
+            testRedirectFlow("1.26.45", 2169);
         } catch (Exception e) {
             throw new IllegalStateException("Self-test failed: Bedrock redirect", e);
         }
@@ -45,24 +46,25 @@ final class BedrockRedirectSelfTest {
                 "malformed Login advanced redirect stage");
     }
 
-    private static void test2168RedirectFlow() throws Exception {
+    private static void testRedirectFlow(String gameVersion, int protocol) throws Exception {
         List<byte[]> sent = new ArrayList<>();
         BedrockRedirectSession session = new BedrockRedirectSession(
-                "127.0.0.1", 19132, "1.26.44", true, sent::add);
+                "127.0.0.1", 19132, gameVersion, true, sent::add);
 
-        session.accept(BedrockBatchCodec.encodeSingle(requestNetworkSettings(2168), true, false));
+        session.accept(BedrockBatchCodec.encodeSingle(requestNetworkSettings(protocol), true, false));
+        require(session.configuredProtocol() == protocol, gameVersion + " protocol mapping");
         require(session.stage() == BedrockRedirectSession.Stage.NETWORK_SETTINGS_SENT,
-                "redirect did not send NetworkSettings");
-        require(session.compressionNegotiated(), "redirect did not enter post-settings framing");
+                gameVersion + " redirect did not send NetworkSettings");
+        require(session.compressionNegotiated(), gameVersion + " redirect did not enter post-settings framing");
         var networkSettingsBatch = BedrockBatchCodec.decode(sent.get(0), false).orElseThrow();
         require(networkSettingsBatch.packets().size() == 1, "NetworkSettings batch packet count mismatch");
         require(Arrays.equals(BedrockNetworkSettingsEncoder.encodeNoCompression(),
                         networkSettingsBatch.packets().get(0)),
-                "redirect NetworkSettings differs from verified encoder");
+                gameVersion + " redirect NetworkSettings differs from verified encoder");
 
-        session.accept(BedrockBatchCodec.encodeSingle(loginPacket(2168, "signed-connection-request"), true, true));
+        session.accept(BedrockBatchCodec.encodeSingle(loginPacket(protocol, "signed-connection-request"), true, true));
         require(session.stage() == BedrockRedirectSession.Stage.LOGIN_ACCEPTED,
-                "redirect did not advance on Login");
+                gameVersion + " redirect did not advance on Login");
         var loginReply = BedrockBatchCodec.decode(sent.get(1), true).orElseThrow();
         require(loginReply.packets().size() == 2, "login reply must contain PlayStatus and ResourcePacksInfo");
         require(BedrockRedirectProtocol.packetId(loginReply.packets().get(0)) == 2,
@@ -72,17 +74,20 @@ final class BedrockRedirectSelfTest {
 
         session.accept(BedrockBatchCodec.encodeSingle(resourcePackResponse(2, "downloadingfinished"), true, true));
         require(session.stage() == BedrockRedirectSession.Stage.PACK_STACK_SENT,
-                "redirect did not send ResourcePackStack");
+                gameVersion + " redirect did not send ResourcePackStack");
         var stackReply = BedrockBatchCodec.decode(sent.get(2), true).orElseThrow();
         require(BedrockRedirectProtocol.packetId(stackReply.packets().get(0)) == 7,
                 "expected ResourcePackStack");
 
         session.accept(BedrockBatchCodec.encodeSingle(resourcePackResponse(3, "resourcepackstackfinished"), true, true));
         require(session.stage() == BedrockRedirectSession.Stage.TRANSFER_SENT,
-                "redirect did not send TransferPacket");
+                gameVersion + " redirect did not send TransferPacket");
         var transferReply = BedrockBatchCodec.decode(sent.get(3), true).orElseThrow();
         require(BedrockRedirectProtocol.packetId(transferReply.packets().get(0)) == 85,
                 "expected TransferPacket");
+        require(Arrays.equals(BedrockTransferEncoder.encodePacket(protocol, "127.0.0.1", 19132, false),
+                        transferReply.packets().get(0)),
+                gameVersion + " TransferPacket differs from verified encoder");
     }
 
     private static byte[] requestNetworkSettings(int protocol) {
