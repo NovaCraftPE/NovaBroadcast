@@ -10,16 +10,17 @@ import java.nio.file.Path;
 import java.util.Map;
 import java.util.function.Consumer;
 
-/**
- * Bedrock/Xbox authentication backed by the public MinecraftAuth library.
- *
- * This is kept separate from NovaBroadcast's older user-only OAuth/XSTS path so
- * we can validate Bedrock-compatible authentication without enabling any MPSD writes.
- */
+/** Bedrock/Xbox authentication backed by the public MinecraftAuth library. */
 final class MinecraftBedrockAuth {
     private static final Path CACHE = Path.of("data/minecraft-bedrock-auth.json");
 
+    record Result(XboxIdentity identity, String pmsgId) {}
+
     XboxIdentity authenticate(String bedrockVersion) throws Exception {
+        return authenticateDetailed(bedrockVersion).identity();
+    }
+
+    Result authenticateDetailed(String bedrockVersion) throws Exception {
         var httpClient = MinecraftAuth.createHttpClient();
         BedrockAuthManager manager = null;
 
@@ -54,6 +55,13 @@ final class MinecraftBedrockAuth {
             throw new IllegalStateException("Bedrock authentication returned an empty Xbox authorization header.");
         }
 
+        String pmsgId = "";
+        try {
+            pmsgId = manager.getMinecraftSession().getCached().getParsedToken().getPayload().reqString("pmid");
+        } catch (Exception e) {
+            System.out.println("[BedrockAuth] WARN Minecraft session token did not expose pmid; session publishing preflight will fail closed.");
+        }
+
         Files.createDirectories(CACHE.toAbsolutePath().getParent());
         Files.writeString(CACHE, BedrockAuthManager.toJson(manager).toString());
 
@@ -75,6 +83,6 @@ final class MinecraftBedrockAuth {
         if (!gamertag.isBlank()) System.out.println("[BedrockAuth] Gamertag: " + gamertag);
         if (!xuid.isBlank()) System.out.println("[BedrockAuth] XUID: " + xuid);
 
-        return new XboxIdentity("", "", xuid, gamertag, authorization);
+        return new Result(new XboxIdentity("", "", xuid, gamertag, authorization), pmsgId);
     }
 }
