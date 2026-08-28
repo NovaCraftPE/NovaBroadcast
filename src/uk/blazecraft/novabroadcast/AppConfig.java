@@ -18,6 +18,8 @@ record AppConfig(
         String sessionScid,
         String sessionTemplate,
         String sessionName,
+        String sessionCustomPropertiesFile,
+        String sessionMemberCustomPropertiesFile,
         String netherNetListenHost,
         int netherNetListenPort,
         int netherNetMaxSdpBytes,
@@ -57,6 +59,8 @@ record AppConfig(
                 p.getProperty("session.scid", "").trim(),
                 p.getProperty("session.template", "").trim(),
                 p.getProperty("session.name", "NovaBroadcast").trim(),
+                p.getProperty("session.customPropertiesFile", "").trim(),
+                p.getProperty("session.memberCustomPropertiesFile", "").trim(),
                 p.getProperty("nethernet.listenHost", "0.0.0.0").trim(),
                 parsePort(p, "nethernet.listenPort", 19134),
                 parsePositive(p, "nethernet.maxSdpBytes", 1_048_576),
@@ -116,6 +120,12 @@ session.scid=
 session.template=
 session.name=NovaBroadcast
 session.writeEnabled=false
+
+# Optional title-authorized JSON objects. NovaBroadcast never guesses Minecraft
+# custom property names. Supply these only from your legitimate title/session
+# integration data. Files must each contain one JSON object.
+session.customPropertiesFile=
+session.memberCustomPropertiesFile=
 
 # NetherNet/WebRTC.
 nethernet.enabled=false
