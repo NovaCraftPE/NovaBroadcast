@@ -12,7 +12,7 @@ final class SelfTest {
     static void run() {
         testNetherNetFraming();
         testNetworkSettingsPacket();
-        testTransferPacket2168();
+        testTransferPackets();
         testWireInspection();
         testConnectionTracking();
         testBedrockBatchCodec();
@@ -82,14 +82,16 @@ final class SelfTest {
                 "redirect must use verified NetworkSettings encoder");
     }
 
-    private static void testTransferPacket2168() {
-        byte[] encoded = BedrockTransferEncoder.encodePacket(2168, "127.0.0.1", 19132, false);
+    private static void testTransferPackets() {
         byte[] expected = new byte[] {
                 0x55, 0x09,
                 '1','2','7','.','0','.','0','.','1',
                 (byte) 0xbc, 0x4a, 0x00, 0x00
         };
-        require(Arrays.equals(expected, encoded), "protocol 2168 TransferPacket exact bytes");
+        byte[] v2168 = BedrockTransferEncoder.encodePacket(2168, "127.0.0.1", 19132, false);
+        byte[] v2169 = BedrockTransferEncoder.encodePacket(2169, "127.0.0.1", 19132, false);
+        require(Arrays.equals(expected, v2168), "protocol 2168 TransferPacket exact bytes");
+        require(Arrays.equals(expected, v2169), "protocol 2169 TransferPacket exact bytes");
     }
 
     private static void testWireInspection() {
@@ -142,10 +144,15 @@ final class SelfTest {
         var info = BedrockRedirectProtocol.loginInfo(login);
         require(info != null && info.protocolVersion() == 2168 && info.connectionRequestBytes() == 18,
                 "Login fixed-prefix parser");
+        byte[] login2169 = loginPacket(2169, "connection-request");
+        var info2169 = BedrockRedirectProtocol.loginInfo(login2169);
+        require(info2169 != null && info2169.protocolVersion() == 2169 && info2169.connectionRequestBytes() == 18,
+                "protocol 2169 Login fixed-prefix parser");
         require(BedrockRedirectProtocol.loginInfo(new byte[] {0x01}) == null, "malformed Login rejection");
         require(BedrockProtocolVersions.matches("1.26.40", 2168), "1.26.40 protocol mapping");
         require(BedrockProtocolVersions.matches("1.26.43", 2168), "1.26.43 protocol mapping");
         require(BedrockProtocolVersions.matches("1.26.44", 2168), "1.26.44 protocol mapping");
+        require(BedrockProtocolVersions.matches("1.26.45", 2169), "1.26.45 protocol mapping");
         require(!BedrockProtocolVersions.matches("1.26.45", 2168), "1.26.45 must not map to 2168");
     }
 
@@ -194,9 +201,7 @@ final class SelfTest {
             require("{\"networkId\":\"abc\",\"enabled\":true}".equals(Json.stringify(c.sessionCustom())),
                     "deterministic extracted JSON");
 
-            String ambiguous = dump.replace("{\"role\":\"host\"}}}}]}\"", "{\"role\":\"guest\"}}}}]}\"");
-            // Explicit second sample avoids relying on textual shape if the first fixture changes.
-            ambiguous = "{\"results\":[{\"sessionRef\":{\"scid\":\"s\",\"templateName\":\"t\",\"name\":\"n\"}," +
+            String ambiguous = "{\"results\":[{\"sessionRef\":{\"scid\":\"s\",\"templateName\":\"t\",\"name\":\"n\"}," +
                     "\"session\":{\"members\":{\"1\":{\"properties\":{\"custom\":{\"role\":\"host\"}}}," +
                     "\"2\":{\"properties\":{\"custom\":{\"role\":\"guest\"}}}}}}]}";
             require(ActivityImport.parse(ambiguous).get(0).memberCustom().isEmpty(),
