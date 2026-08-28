@@ -69,7 +69,8 @@ final class ActivityImport {
             }
 
             StringBuilder properties = new StringBuilder();
-            properties.append("# Candidate extracted from data/mpsd-activities.json\n");
+            properties.append("# REFERENCE ONLY: extracted from the authenticated account's existing activity.\n");
+            properties.append("# Review dynamic/title-specific custom fields before any live publication.\n");
             if (!candidate.titleId().isBlank()) properties.append("# titleId=").append(candidate.titleId()).append('\n');
             properties.append("session.scid=").append(candidate.scid()).append('\n');
             properties.append("session.template=").append(candidate.templateName()).append('\n');
