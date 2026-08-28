@@ -5,6 +5,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /** Clean-room Xbox Multiplayer Session Directory client. */
@@ -72,6 +73,23 @@ final class SessionDirectoryClient {
         }
     }
 
+    void dumpOwnActivities(Path output) throws Exception {
+        if (identity.xuid() == null || identity.xuid().isBlank()) {
+            throw new IllegalStateException("Xbox identity does not contain an XUID.");
+        }
+        String url = MPSD + "/handles/query?include=relatedInfo,session" +
+                "&xuid=" + encode(identity.xuid()) +
+                "&private=true&inactive=true&reservations=true&take=100";
+        Http.Response response = Http.post(url, "{\"type\":\"activity\"}", writeHeaders());
+        response.requireOk("MPSD own-activity query");
+
+        Path parent = output.toAbsolutePath().getParent();
+        if (parent != null) Files.createDirectories(parent);
+        Files.writeString(output, response.body(), StandardCharsets.UTF_8);
+        System.out.println("[Session] Saved authenticated activity dump to " + output.toAbsolutePath());
+        printActivitySummary(response.body());
+    }
+
     Http.Response create(AppConfig config, String document) throws Exception {
         Map<String,String> h = writeHeaders();
         h.put("If-None-Match", "*");
@@ -100,6 +118,34 @@ final class SessionDirectoryClient {
                     "\"name\":" + Json.quote(config.sessionName()) +
                 "}" +
             "}";
+    }
+
+    static int activityCount(String json) {
+        Object root = Json.parse(json);
+        if (!(root instanceof Map<?,?> map)) return 0;
+        Object results = map.get("results");
+        return results instanceof List<?> list ? list.size() : 0;
+    }
+
+    private static void printActivitySummary(String json) {
+        Object root = Json.parse(json);
+        if (!(root instanceof Map<?,?> map) || !(map.get("results") instanceof List<?> results)) {
+            System.out.println("[Session] Activity query returned no parseable results array.");
+            return;
+        }
+        System.out.println("[Session] Activity handles found: " + results.size());
+        for (Object item : results) {
+            if (!(item instanceof Map<?,?> handle)) continue;
+            Object refObj = handle.get("sessionRef");
+            if (!(refObj instanceof Map<?,?> ref)) continue;
+            String scid = value(ref.get("scid"));
+            String template = value(ref.get("templateName"));
+            String name = value(ref.get("name"));
+            String titleId = value(handle.get("titleId"));
+            System.out.println("[Session] Activity" +
+                    (titleId.isBlank() ? "" : " titleId=" + titleId) +
+                    " scid=" + scid + " template=" + template + " name=" + name);
+        }
     }
 
     private TemplateInfo validateTemplate(AppConfig config) throws Exception {
@@ -177,5 +223,6 @@ final class SessionDirectoryClient {
         return URLEncoder.encode(value, StandardCharsets.UTF_8).replace("+", "%20");
     }
 
+    private static String value(Object value) { return value == null ? "" : String.valueOf(value); }
     private record TemplateInfo(String visibility, boolean connectivity, boolean gameplay) {}
 }
