@@ -50,6 +50,8 @@ final class MinecraftMpsdPreflight {
         MinecraftSessionPreflight.run(config);
         System.out.println("[MinecraftPreflight] Continuing with Xbox-RPC NetherNet signaling validation...");
         XboxRpcSignalingPreflight.run(config);
+        System.out.println("[MinecraftPreflight] Continuing with authenticated NetherNet server-channel validation...");
+        MinecraftNetherNetChannelPreflight.run(config);
         System.out.println("[MinecraftPreflight] PASS all read-only Minecraft broadcast prerequisites completed.");
     }
 
