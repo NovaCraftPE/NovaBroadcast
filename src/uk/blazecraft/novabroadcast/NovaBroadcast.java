@@ -13,6 +13,7 @@ public final class NovaBroadcast {
                 SelfTest.run();
                 BedrockRedirectSelfTest.run();
                 ActivityDiffSelfTest.run();
+                BedrockTargetProbeSelfTest.run();
                 return;
             }
             if (Arrays.asList(args).contains("--webrtc-smoke-test")) {
@@ -21,6 +22,10 @@ public final class NovaBroadcast {
             }
             if (Arrays.asList(args).contains("--config-check")) {
                 ConfigCheck.run(Path.of("config.properties"));
+                return;
+            }
+            if (Arrays.asList(args).contains("--target-check")) {
+                targetCheck();
                 return;
             }
             if (Arrays.asList(args).contains("--prepare-activity-import")) {
@@ -124,6 +129,22 @@ public final class NovaBroadcast {
             if (Boolean.getBoolean("novabroadcast.debug")) e.printStackTrace();
             System.exit(1);
         }
+    }
+
+    private static void targetCheck() throws Exception {
+        AppConfig config = AppConfig.load(Path.of("config.properties"));
+        System.out.println("[TargetCheck] Probing " + config.targetHost() + ":" + config.targetPort() + " over RakNet UDP...");
+        BedrockTargetProbe.Result result = BedrockTargetProbe.probe(config.targetHost(), config.targetPort(), 3000);
+        System.out.println("[TargetCheck] MOTD: " + result.motd());
+        System.out.println("[TargetCheck] Edition: " + result.edition());
+        System.out.println("[TargetCheck] Version: " + result.version() + " / protocol " + result.protocol());
+        System.out.println("[TargetCheck] Players: " + result.players() + "/" + result.maxPlayers());
+        int expected = BedrockProtocolVersions.requireProtocol(config.bedrockGameVersion());
+        if (result.protocol() != expected) {
+            throw new IllegalStateException("[TargetCheck] FAIL target advertises protocol " + result.protocol() +
+                    " but bedrock.gameVersion=" + config.bedrockGameVersion() + " expects " + expected);
+        }
+        System.out.println("[TargetCheck] PASS target is reachable and protocol matches the configured redirect version.");
     }
 
     private static void prepareActivityImport() throws Exception {
