@@ -8,6 +8,7 @@ Current milestone:
 - Microsoft device-code sign-in and refresh-token cache
 - Xbox User Token / XSTS exchange and profile lookup
 - clean MPSD preflight and guarded session lifecycle
+- authenticated MPSD activity discovery and activity-handle binding
 - NetherNet HTTP signaling (`GET /v1/join`, `POST /v1/join/{networkId}`)
 - native answering-side WebRTC via Apache-2.0 `webrtc-java`
 - persistent P-384 NetherNet operator identity and signed server `a=identity`
@@ -38,6 +39,29 @@ On Debian/Ubuntu Linux install the WebRTC JNI runtime dependency:
 On first launch `config.properties` is created. Set `microsoft.clientId` to an
 application/client ID authorized for the Xbox Live scopes used by the account
 flow. Tokens are cached in `data/auth.properties`.
+
+## Discover your own Xbox activities
+
+NovaBroadcast can query the authenticated account's own MPSD activity handles
+using the public `/handles/query` contract without creating or modifying a
+session:
+
+    java -jar NovaBroadcast.jar --dump-activities
+
+The raw response is stored at:
+
+    data/mpsd-activities.json
+
+NovaBroadcast also prints each returned `titleId`, SCID, template name and
+session name. The query asks MPSD for `relatedInfo,session` and uses the signed-in
+account's XUID filter, including private/inactive/reservation results that the
+caller is authorized to inspect. This mode is intended to capture legitimate
+session metadata from the user's own Xbox activity rather than hard-code or copy
+Minecraft-owned constants.
+
+A useful clean-room test is to start/join a normal Minecraft Bedrock multiplayer
+session on the same Microsoft/Xbox account, then run `--dump-activities` and
+inspect the resulting session reference/data.
 
 ## Bedrock redirect bootstrap
 
@@ -101,6 +125,7 @@ Center. NovaBroadcast requires explicit authorized values:
     session.template=
     session.name=NovaBroadcast
     session.writeEnabled=false
+    session.setActivity=false
 
 Microsoft MPSD templates control system constants such as visibility and
 connectivity capabilities. Minecraft-specific bootstrap values live in custom
@@ -116,7 +141,7 @@ custom JSON objects into files and reference them:
 Each file must contain one JSON object. The member file is optional; the session
 custom-properties file is mandatory for a live publication.
 
-A live MPSD write now requires all of the following:
+A live MPSD write requires all of the following:
 
 1. `session.writeEnabled=true`
 2. `nethernet.enabled=true`
@@ -127,6 +152,12 @@ A live MPSD write now requires all of the following:
 If any requirement fails, NovaBroadcast refuses to advertise the session. The
 create call uses `If-None-Match: *` so an existing session with the same name is
 not silently overwritten.
+
+If `session.setActivity=true`, a successful publication is followed by the
+standard Xbox MPSD `activity` handle write referencing the same SCID/template/
+session name. This binds the published session as the signed-in user's current
+join-in-progress/social activity. It is separately opt-in because setting a new
+activity replaces the account's previous bound activity.
 
 ## Minecraft client authentication
 
