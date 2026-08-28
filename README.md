@@ -8,7 +8,7 @@ Current milestone:
 - Microsoft device-code sign-in and refresh-token cache
 - Xbox User Token / XSTS exchange and profile lookup
 - clean MPSD preflight and guarded session lifecycle
-- authenticated MPSD activity discovery and activity-handle binding
+- authenticated MPSD activity discovery, offline candidate extraction, and activity-handle binding
 - NetherNet HTTP signaling (`GET /v1/join`, `POST /v1/join/{networkId}`)
 - native answering-side WebRTC via Apache-2.0 `webrtc-java`
 - persistent P-384 NetherNet operator identity and signed server `a=identity`
@@ -16,12 +16,13 @@ Current milestone:
 - protocol-2168 Bedrock batch framing and redirect-only handshake
 - guarded automatic `TransferPacket` to the configured target after resource-pack completion
 - explicit MPSD custom-property file support without guessed Minecraft-owned keys
-- Java 21 CI, protocol/identity/redirect self-tests, native WebRTC smoke test, and tested JAR artifact
+- Java 21 CI, protocol/identity/redirect/import self-tests, native WebRTC smoke test, and tested JAR artifact
 
 ## Build and test
 
     ./build.sh
     java -jar NovaBroadcast.jar --self-test
+    java -jar NovaBroadcast.jar --config-check
     java -jar NovaBroadcast.jar --webrtc-smoke-test
 
 Output:
@@ -40,28 +41,51 @@ On first launch `config.properties` is created. Set `microsoft.clientId` to an
 application/client ID authorized for the Xbox Live scopes used by the account
 flow. Tokens are cached in `data/auth.properties`.
 
-## Discover your own Xbox activities
+## Discover your own Xbox/Minecraft activity
 
-NovaBroadcast can query the authenticated account's own MPSD activity handles
-using the public `/handles/query` contract without creating or modifying a
-session:
+The clean-room discovery path reads only the authenticated account's own MPSD
+activity data. It does not create, overwrite, join, leave, or publish sessions.
 
-    java -jar NovaBroadcast.jar --dump-activities
+For the complete discovery + offline extraction flow:
 
-The raw response is stored at:
+    java -jar NovaBroadcast.jar --discover-session
+
+This first performs the authenticated activity query, stores the raw response at:
 
     data/mpsd-activities.json
 
-NovaBroadcast also prints each returned `titleId`, SCID, template name and
-session name. The query asks MPSD for `relatedInfo,session` and uses the signed-in
-account's XUID filter, including private/inactive/reservation results that the
-caller is authorized to inspect. This mode is intended to capture legitimate
-session metadata from the user's own Xbox activity rather than hard-code or copy
-Minecraft-owned constants.
+and then prepares each complete `sessionRef` under:
 
-A useful clean-room test is to start/join a normal Minecraft Bedrock multiplayer
-session on the same Microsoft/Xbox account, then run `--dump-activities` and
-inspect the resulting session reference/data.
+    data/activity-import/candidate-N/
+
+Each candidate can contain:
+
+    session.properties
+    session-custom.json
+    member-custom.json   # only when the member custom object is unambiguous
+
+`session.properties` contains the discovered SCID, template and session name plus
+paths to extracted custom-property JSON. It always keeps:
+
+    session.writeEnabled=false
+    session.setActivity=false
+
+so discovery cannot accidentally publish or replace the account's current Xbox
+activity.
+
+The two stages can also be run independently:
+
+    java -jar NovaBroadcast.jar --dump-activities
+    java -jar NovaBroadcast.jar --prepare-activity-import
+
+A useful test is to start or join a normal Minecraft Bedrock multiplayer activity
+on the same Microsoft/Xbox account immediately before running `--discover-session`.
+
+**Important:** captured custom properties are reference data, not automatically
+publication-ready. Title/session fields can contain values tied to the original
+live Minecraft host or activity. NovaBroadcast deliberately does not infer which
+private title fields should be replaced. Compare/inspect the captured candidate
+before enabling a write; the main configuration is never modified by discovery.
 
 ## Bedrock redirect bootstrap
 
@@ -114,6 +138,9 @@ Example transport configuration:
     nethernet.iceMaxPort=20100
 
 The signaling TCP port and configured ICE UDP range must be externally reachable.
+The client supplies its own opaque `NetworkID` in `POST /v1/join/{networkId}`;
+NovaBroadcast treats it as an opaque routing/admission identifier and does not
+assume a numeric format.
 
 ## MPSD publication
 
