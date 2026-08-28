@@ -76,6 +76,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          set -euo pipefail
+
           # Fail closed if another commit reached this branch while this run was
           # executing. Only the current branch head may replace development-latest.
           git fetch origin "$GITHUB_REF_NAME"
@@ -85,11 +87,30 @@ jobs:
             exit 0
           fi
 
-          gh release delete development-latest --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes 2>/dev/null || true
+          # Remove any previous release object using this tag, including a draft that
+          # GitHub may expose through an untagged-* URL.
+          for RELEASE_ID in $(gh api "/repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq '.[] | select(.tag_name == "development-latest") | .id'); do
+            gh api --method DELETE "/repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID"
+          done
+
+          git push origin :refs/tags/development-latest 2>/dev/null || true
           git tag -f development-latest "$GITHUB_SHA"
           git push origin refs/tags/development-latest --force
+
           gh release create development-latest NovaBroadcast.jar \
             --repo "$GITHUB_REPOSITORY" \
             --title "NovaBroadcast Development Build" \
             --notes "Tested development build from commit $GITHUB_SHA. Download NovaBroadcast.jar directly from Assets." \
             --prerelease
+
+          # Explicitly force the release visible. If GitHub ever creates it as a draft,
+          # this converts it before the workflow is considered successful.
+          gh api --method PATCH "/repos/$GITHUB_REPOSITORY/releases/tags/development-latest" \
+            -f draft=false \
+            -f prerelease=true >/dev/null
+
+          IS_DRAFT="$(gh api "/repos/$GITHUB_REPOSITORY/releases/tags/development-latest" --jq '.draft')"
+          if [ "$IS_DRAFT" != "false" ]; then
+            echo "Release publication failed: development-latest is still a draft"
+            exit 1
+          fi
