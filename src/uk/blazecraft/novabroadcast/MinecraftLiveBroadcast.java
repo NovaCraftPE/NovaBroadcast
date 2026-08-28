@@ -91,7 +91,7 @@ final class MinecraftLiveBroadcast implements AutoCloseable {
         System.out.println("[MinecraftLive] PASS signaling authenticated; ICE/TURN entries=" + iceServers.size());
 
         this.boss = new NioEventLoopGroup(1);
-        this.workers = new NioEventLoopGroup();
+        this.workers = new NioEventLoopGroup(2);
 
         ServerBootstrap bootstrap = new ServerBootstrap();
         bootstrap.group(boss, workers)
@@ -113,10 +113,12 @@ final class MinecraftLiveBroadcast implements AutoCloseable {
         System.out.println("[MinecraftLive] PASS authenticated NetherNet server channel is open.");
 
         String worldName = config.targetName().isBlank() ? target.motd() : config.targetName();
+        int advertisedPlayers = Math.max(1, target.players());
+        int advertisedMaxPlayers = Math.max(advertisedPlayers + 1, target.maxPlayers());
         String sessionDocument = MinecraftSessionPreflight.buildDocument(
                 identity.xuid(), connectionId, subscriptionId,
                 networkId, auth.pmsgId(), worldName, worldName,
-                Math.max(0, target.players()), Math.max(1, target.maxPlayers()),
+                advertisedPlayers, advertisedMaxPlayers,
                 target.protocol(), target.version());
 
         Http.Response sessionResponse = Http.put(sessionUri(), sessionDocument, mpsdHeaders(true));
@@ -165,7 +167,7 @@ final class MinecraftLiveBroadcast implements AutoCloseable {
         @Override
         public void channelActive(ChannelHandlerContext ctx) throws Exception {
             this.redirect = new BedrockRedirectSession(
-                    cfg.targetHost(), cfg.targetPort(), cfg.bedrockGameVersion(), true,
+                    cfg.targetHost(), cfg.targetPort(), cfg.bedrockGameVersion(), true, true,
                     payload -> ctx.writeAndFlush(Unpooled.wrappedBuffer(payload)));
             System.out.println("[MinecraftLive] Bedrock client connected through NetherNet.");
             super.channelActive(ctx);
