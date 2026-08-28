@@ -17,6 +17,7 @@ final class SelfTest {
         testConnectionTracking();
         testBedrockBatchCodec();
         testRedirectProtocolPackets();
+        testActivityHandleDocument();
         testNetherNetIdentity();
         System.out.println("[SelfTest] Core tests passed.");
     }
@@ -145,6 +146,29 @@ final class SelfTest {
         require(BedrockProtocolVersions.matches("1.26.43", 2168), "1.26.43 protocol mapping");
         require(BedrockProtocolVersions.matches("1.26.44", 2168), "1.26.44 protocol mapping");
         require(!BedrockProtocolVersions.matches("1.26.45", 2168), "1.26.45 must not map to 2168");
+    }
+
+    private static void testActivityHandleDocument() {
+        try {
+            Path file = Files.createTempFile("novabroadcast-activity", ".properties");
+            Files.writeString(file, "session.scid=test-scid\nsession.template=test-template\nsession.name=test-session\nsession.setActivity=true\n");
+            AppConfig config = AppConfig.load(file);
+            String body = SessionDirectoryClient.activityHandleDocument(config);
+            Object parsed = Json.parse(body);
+            require(parsed instanceof Map<?,?>, "activity handle document must be an object");
+            Map<?,?> root = (Map<?,?>) parsed;
+            require("activity".equals(root.get("type")), "activity handle type");
+            require(Long.valueOf(1).equals(root.get("version")) || Integer.valueOf(1).equals(root.get("version")), "activity handle version");
+            require(root.get("sessionRef") instanceof Map<?,?>, "activity sessionRef object");
+            Map<?,?> ref = (Map<?,?>) root.get("sessionRef");
+            require("test-scid".equals(ref.get("scid")), "activity SCID");
+            require("test-template".equals(ref.get("templateName")), "activity template");
+            require("test-session".equals(ref.get("name")), "activity session name");
+            require(config.sessionSetActivity(), "session.setActivity config");
+            Files.deleteIfExists(file);
+        } catch (Exception e) {
+            throw new IllegalStateException("Self-test failed: MPSD activity handle", e);
+        }
     }
 
     private static byte[] loginPacket(int protocol, String connectionRequest) {
