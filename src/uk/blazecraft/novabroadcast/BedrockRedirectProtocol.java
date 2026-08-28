@@ -27,9 +27,6 @@ final class BedrockRedirectProtocol {
     static final int PACK_STATUS_COMPLETED = 3;
 
     static byte[] networkSettingsNone() {
-        // Keep this shared with the exact-byte-tested NetworkSettings encoder.
-        // PacketCompressionAlgorithm::None is enum value 2 on current Bedrock,
-        // not the compression batch method marker 0xff.
         return BedrockNetworkSettingsEncoder.encodeNoCompression();
     }
 
@@ -67,6 +64,26 @@ final class BedrockRedirectProtocol {
         if (header == null || header.packetId != REQUEST_NETWORK_SETTINGS) return null;
         if (header.bytes + 4 > packet.length) return null;
         return ByteBuffer.wrap(packet, header.bytes, 4).order(ByteOrder.BIG_ENDIAN).getInt();
+    }
+
+    /**
+     * Parse only the public fixed prefix of Login: network version followed by
+     * the VarUInt-length connection-request string. The redirect does not
+     * decode or trust the inner connection-request JWT chain here; NetherNet
+     * client admission has already been independently authenticated at SDP time.
+     */
+    static LoginInfo loginInfo(byte[] packet) {
+        Header header = header(packet);
+        if (header == null || header.packetId != LOGIN) return null;
+        int cursor = header.bytes;
+        if (cursor + 4 > packet.length) return null;
+        int protocol = ByteBuffer.wrap(packet, cursor, 4).order(ByteOrder.BIG_ENDIAN).getInt();
+        cursor += 4;
+        BedrockBatchCodec.VarUInt requestLength = BedrockBatchCodec.readVarUInt(packet, cursor);
+        if (requestLength == null || requestLength.value() <= 0) return null;
+        cursor += requestLength.bytes();
+        if (requestLength.value() > packet.length - cursor) return null;
+        return new LoginInfo(protocol, requestLength.value());
     }
 
     static Integer resourcePackResponseStatus(byte[] packet) {
@@ -111,6 +128,7 @@ final class BedrockRedirectProtocol {
         out.write(value & 0xff);
     }
 
+    record LoginInfo(int protocolVersion, int connectionRequestBytes) {}
     private record Header(int packetId, int bytes) {}
     private BedrockRedirectProtocol() {}
 }
