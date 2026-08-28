@@ -6,13 +6,14 @@
 
     <groupId>uk.blazecraft</groupId>
     <artifactId>novabroadcast</artifactId>
-    <version>0.6-bedrock-auth</version>
+    <version>0.7-xbox-rpc-preflight</version>
 
     <properties>
         <maven.compiler.release>21</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <webrtc.version>0.14.0</webrtc.version>
         <minecraftauth.version>5.0.1-20260507.085226-5</minecraftauth.version>
+        <nethernet.version>1.7.3</nethernet.version>
     </properties>
 
     <repositories>
@@ -40,6 +41,11 @@
             <groupId>net.raphimc</groupId>
             <artifactId>MinecraftAuth</artifactId>
             <version>${minecraftauth.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>dev.kastle.netty</groupId>
+            <artifactId>netty-transport-nethernet</artifactId>
+            <version>${nethernet.version}</version>
         </dependency>
     </dependencies>
 
