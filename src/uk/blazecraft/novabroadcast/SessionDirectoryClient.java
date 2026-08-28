@@ -17,7 +17,11 @@ final class SessionDirectoryClient {
         this.identity = identity;
     }
 
-    void start(AppConfig config) throws Exception {
+    /**
+     * Starts the configured MPSD lifecycle and returns true only when this
+     * process actually published a live session member that must later leave.
+     */
+    boolean start(AppConfig config) throws Exception {
         requireConfigured(config);
 
         System.out.println();
@@ -38,7 +42,7 @@ final class SessionDirectoryClient {
             if (config.sessionSetActivity()) {
                 System.out.println("[Session] session.setActivity=true ignored during dry-run.");
             }
-            return;
+            return false;
         }
 
         if (!config.netherNetEnabled()) {
@@ -65,12 +69,19 @@ final class SessionDirectoryClient {
         if (config.sessionSetActivity()) {
             Http.Response activity = setActivity(config);
             if (!activity.ok()) {
+                // The member exists now, so best-effort leave before surfacing the
+                // activity failure. This prevents an orphaned active member.
+                try { leavePublishedSession(config); }
+                catch (Exception cleanup) {
+                    System.err.println("[Session] Cleanup after activity failure also failed: " + cleanup.getMessage());
+                }
                 throw new IllegalStateException("MPSD activity handle create failed: HTTP " + activity.status() + " " + activity.body());
             }
             System.out.println("[Session] Xbox activity handle now points to the published session.");
         } else {
             System.out.println("[Session] Activity handle not changed (session.setActivity=false).");
         }
+        return true;
     }
 
     void dumpOwnActivities(Path output) throws Exception {
@@ -102,6 +113,18 @@ final class SessionDirectoryClient {
 
     Http.Response leave(AppConfig config) throws Exception {
         return Http.delete(sessionUri(config) + "/members/me", headers());
+    }
+
+    void leavePublishedSession(AppConfig config) throws Exception {
+        Http.Response response = leave(config);
+        if (response.status() == 404) {
+            System.out.println("[Session] Published MPSD member was already absent during shutdown.");
+            return;
+        }
+        if (!response.ok()) {
+            throw new IllegalStateException("MPSD member leave failed: HTTP " + response.status() + " " + response.body());
+        }
+        System.out.println("[Session] Left published MPSD session; bound activity cleanup is delegated to MPSD.");
     }
 
     Http.Response setActivity(AppConfig config) throws Exception {
