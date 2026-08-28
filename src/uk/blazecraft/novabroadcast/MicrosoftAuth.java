@@ -161,17 +161,38 @@ final class MicrosoftAuth {
             ar = new AuthorizationResponse("", "", "invalid_callback", e.getMessage() == null ? "Invalid callback" : e.getMessage());
         }
 
-        responses.offer(ar);
-        String body = """
+        boolean isAuthResponse = !ar.code().isBlank() || !ar.error().isBlank();
+        String body;
+        int status;
+        if (isAuthResponse) {
+            status = 200;
+            body = """
 <!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>NovaBroadcast</title></head>
 <body style="font-family:system-ui;padding:32px;max-width:680px;margin:auto"><h1>NovaBroadcast</h1><p>Microsoft sign-in has returned to the server. You can close this page and go back to the server console.</p></body></html>
 """;
+        } else {
+            status = 200;
+            body = """
+<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>NovaBroadcast</title></head>
+<body style="font-family:system-ui;padding:32px;max-width:680px;margin:auto"><h1>NovaBroadcast</h1><p>The Microsoft callback endpoint is reachable and waiting for a sign-in response.</p></body></html>
+""";
+        }
+
         byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
         exchange.getResponseHeaders().set("Content-Type", "text/html; charset=utf-8");
         exchange.getResponseHeaders().set("Cache-Control", "no-store");
-        exchange.sendResponseHeaders(200, bytes.length);
+        exchange.sendResponseHeaders(status, bytes.length);
         exchange.getResponseBody().write(bytes);
+        exchange.getResponseBody().flush();
         exchange.close();
+
+        // Only unblock the OAuth flow after the HTTP response has been fully sent.
+        // This avoids callbackServer.stop(0) racing the active exchange and causing
+        // browsers/curl to see an empty reply. A plain health-check GET must not
+        // consume the one real authorization callback either.
+        if (isAuthResponse) {
+            responses.offer(ar);
+        }
     }
 
     private String oauthBase() {
