@@ -64,6 +64,11 @@ public final class NovaBroadcast {
             if (!xbox.gamertag().isBlank()) System.out.println("[Xbox] Gamertag: " + xbox.gamertag());
             if (!xbox.xuid().isBlank()) System.out.println("[Xbox] XUID: " + xbox.xuid());
 
+            if (Arrays.asList(args).contains("--live-preflight")) {
+                livePreflight(config, xbox);
+                return;
+            }
+
             boolean dumpActivities = Arrays.asList(args).contains("--dump-activities");
             boolean discoverSession = Arrays.asList(args).contains("--discover-session");
             if (dumpActivities || discoverSession) {
@@ -121,6 +126,27 @@ public final class NovaBroadcast {
             if (Boolean.getBoolean("novabroadcast.debug")) e.printStackTrace();
             System.exit(1);
         }
+    }
+
+    private static void livePreflight(AppConfig config, XboxIdentity xbox) throws Exception {
+        System.out.println("[LivePreflight] Running read-only readiness checks. No MPSD session will be published.");
+        BedrockTargetProbe.Result target = BedrockTargetProbe.probe(config.targetHost(), config.targetPort(), 3000);
+        System.out.println("[LivePreflight] Target: " + target.motd() + " / " + target.version() +
+                " / protocol " + target.protocol());
+        int expected = BedrockProtocolVersions.requireProtocol(config.bedrockGameVersion());
+        if (target.protocol() != expected) {
+            throw new IllegalStateException("[LivePreflight] FAIL target advertises protocol " + target.protocol() +
+                    " but bedrock.gameVersion=" + config.bedrockGameVersion() + " expects " + expected);
+        }
+        System.out.println("[LivePreflight] Target protocol matches configured redirect version.");
+
+        SessionDirectoryClient sessions = new SessionDirectoryClient(xbox);
+        String activities = sessions.ownActivities();
+        System.out.println("[LivePreflight] Authenticated MPSD activity query succeeded; handles=" +
+                SessionDirectoryClient.activityCount(activities));
+        SessionDirectoryClient.printActivitySummary(activities);
+        sessions.preflightOnly(config);
+        System.out.println("[LivePreflight] PASS read-only checks completed. This does not prove Xbox Presence/title engagement or console joinability; those require the real Minecraft/Xbox test.");
     }
 
     private static void targetCheck() throws Exception {
