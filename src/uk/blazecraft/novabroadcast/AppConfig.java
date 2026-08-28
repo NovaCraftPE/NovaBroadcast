@@ -14,6 +14,7 @@ record AppConfig(
         String scope,
         String tenant,
         String xboxRelyingParty,
+        String xboxSandboxId,
         String targetHost,
         int targetPort,
         String targetName,
@@ -61,6 +62,7 @@ record AppConfig(
                 normalizeMicrosoftScope(p.getProperty("microsoft.scope", "xboxlive.signin xboxlive.offline_access")),
                 p.getProperty("microsoft.tenant", "consumers").trim(),
                 p.getProperty("xbox.relyingParty", "http://xboxlive.com").trim(),
+                p.getProperty("xbox.sandboxId", "RETAIL").trim(),
                 p.getProperty("target.host", "127.0.0.1").trim(),
                 parsePort(p, "target.port", 19132),
                 p.getProperty("target.name", "NovaCraft").trim(),
@@ -134,6 +136,8 @@ microsoft.callbackTimeoutSeconds=300
 microsoft.scope=xboxlive.signin xboxlive.offline_access
 microsoft.tenant=consumers
 xbox.relyingParty=http://xboxlive.com
+# Use RETAIL unless Partner Center has explicitly assigned an authorized development sandbox.
+xbox.sandboxId=RETAIL
 
 target.host=54.37.245.44
 target.port=19133
