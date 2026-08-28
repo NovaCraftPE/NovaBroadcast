@@ -37,6 +37,8 @@ final class WebRtcPeerBackend implements NetherNetSignalingServer.PeerBackend, A
         System.out.println("[NetherNet] Operator identity: " + identity.publicKeyFingerprint());
         System.out.println("[NetherNet] Client identity policy: " +
                 (config.netherNetRequireClientIdentity() ? "required" : "verify-if-present"));
+        System.out.println("[Bedrock] Redirect bootstrap: " +
+                (config.bedrockRedirectEnabled() ? "enabled -> " + config.targetHost() + ":" + config.targetPort() : "disabled"));
     }
 
     @Override public boolean ready() { return !closed; }
@@ -124,15 +126,18 @@ final class WebRtcPeerBackend implements NetherNetSignalingServer.PeerBackend, A
         private final NetherNetFraming.ReliableReassembler reliableReassembler = new NetherNetFraming.ReliableReassembler();
         private final BedrockConnectionTracker connectionTracker = new BedrockConnectionTracker();
         private final RTCPeerConnection connection;
+        private final BedrockRedirectSession redirectSession;
         private volatile RTCDataChannel reliable;
         private volatile RTCDataChannel unreliable;
         private volatile boolean peerClosed;
-        private volatile boolean networkSettingsSent;
 
         Peer(String networkId) {
             this.networkId = networkId;
             this.connection = factory.createPeerConnection(peerConfiguration(), new Observer());
             if (connection == null) throw new IllegalStateException("WebRTC peer creation returned null");
+            this.redirectSession = new BedrockRedirectSession(
+                    config.targetHost(), config.targetPort(), config.bedrockGameVersion(),
+                    config.bedrockRedirectEnabled(), this::sendReliable);
         }
 
         String answer(String cleanOfferSdp) throws Exception {
@@ -220,6 +225,15 @@ final class WebRtcPeerBackend implements NetherNetSignalingServer.PeerBackend, A
 
         private void onBedrockPayload(boolean reliableChannel, byte[] payload) {
             String lane = reliableChannel ? "reliable" : "unreliable";
+
+            if (reliableChannel) {
+                try {
+                    redirectSession.accept(payload);
+                } catch (Exception e) {
+                    System.err.println("[Bedrock] Redirect bootstrap failed for " + networkId + ": " + e.getMessage());
+                }
+            }
+
             var inspection = BedrockWireInspector.inspect(payload);
             if (inspection.isPresent()) {
                 var value = inspection.get(); var header = value.header();
@@ -233,24 +247,6 @@ final class WebRtcPeerBackend implements NetherNetSignalingServer.PeerBackend, A
             connectionTracker.observe(payload).ifPresent(observation -> {
                 String protocol = observation.requestedProtocol() == null ? "" : " protocol=" + observation.requestedProtocol();
                 System.out.println("[Bedrock] " + networkId + " stage=" + observation.stage() + protocol);
-
-                if (reliableChannel && observation.packetId() == BedrockConnectionTracker.REQUEST_NETWORK_SETTINGS && !networkSettingsSent) {
-                    if (inspection.isEmpty()) return;
-                    try {
-                        byte[] response = BedrockNetworkSettingsEncoder.matchWireShape(
-                                BedrockNetworkSettingsEncoder.encodeNoCompression(), inspection.get().shape());
-                        sendReliable(response);
-                        networkSettingsSent = true;
-                        System.out.println("[Bedrock] " + networkId + " sent NetworkSettings compression=None");
-                    } catch (Exception e) {
-                        System.err.println("[Bedrock] " + networkId + " failed to send NetworkSettings: " + e.getMessage());
-                    }
-                }
-
-                if (observation.stage() == BedrockConnectionTracker.Stage.CLIENT_INITIALIZED) {
-                    System.out.println("[Bedrock] " + networkId +
-                            " reached client-initialized milestone; transfer remains guarded until login/encryption handling is complete.");
-                }
             });
         }
 
