@@ -107,7 +107,7 @@ final class SessionDirectoryClient {
         if (identity.xuid() == null || identity.xuid().isBlank()) {
             throw new IllegalStateException("Xbox identity does not contain an XUID.");
         }
-        String url = MPSD + "/handles/query?include=relatedInfo,session" +
+        String url = MPSD + "/handles/query?include=relatedinfo" +
                 "&xuid=" + encode(identity.xuid()) +
                 "&private=true&inactive=true&reservations=true&take=100";
         Http.Response response = Http.post(url, "{\"type\":\"activity\"}", writeHeaders());
