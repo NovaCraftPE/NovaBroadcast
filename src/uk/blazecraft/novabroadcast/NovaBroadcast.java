@@ -5,7 +5,7 @@ import java.util.Arrays;
 import java.util.List;
 
 public final class NovaBroadcast {
-    public static final String VERSION = "0.5-cleanroom";
+    public static final String VERSION = "0.6-bedrock-auth";
 
     public static void main(String[] args) {
         try {
@@ -29,6 +29,11 @@ public final class NovaBroadcast {
                 targetCheck();
                 return;
             }
+            if (Arrays.asList(args).contains("--minecraft-auth-preflight")) {
+                AppConfig config = AppConfig.load(Path.of("config.properties"));
+                MinecraftMpsdPreflight.run(config);
+                return;
+            }
             if (Arrays.asList(args).contains("--prepare-activity-import")) {
                 prepareActivityImport();
                 return;
@@ -44,7 +49,7 @@ public final class NovaBroadcast {
             }
 
             System.out.println("NovaBroadcast " + VERSION);
-            System.out.println("Independent Java implementation - no MCXboxBroadcast runtime/source dependency.");
+            System.out.println("Independent NovaBroadcast implementation with public interoperability libraries.");
 
             AppConfig config = AppConfig.load(Path.of("config.properties"));
             if (config.clientId().isBlank()) {
@@ -164,9 +169,6 @@ public final class NovaBroadcast {
             throw e;
         }
 
-        // Activity handle queries have their own permission rules (notably private/reservation filters).
-        // They are useful diagnostics, but a 403 here must not be misreported as failure to access
-        // the already-validated title SCID/template.
         try {
             String activities = sessions.ownActivities();
             System.out.println("[LivePreflight] MPSD activity query succeeded; handles=" +
