@@ -26,6 +26,10 @@ public final class NovaBroadcast {
                 prepareActivityImport();
                 return;
             }
+            if (Arrays.asList(args).contains("--diff-activities")) {
+                diffActivities(args);
+                return;
+            }
 
             System.out.println("NovaBroadcast " + VERSION);
             System.out.println("Independent Java implementation - no MCXboxBroadcast runtime/source dependency.");
@@ -98,5 +102,13 @@ public final class NovaBroadcast {
             System.out.println("[ActivityImport] No complete sessionRef candidates were present in the dump.");
         }
         System.out.println("[ActivityImport] Main config was not modified and publishing remains disabled.");
+    }
+
+    private static void diffActivities(String[] args) throws Exception {
+        int i = Arrays.asList(args).indexOf("--diff-activities");
+        if (i < 0 || i + 2 >= args.length) {
+            throw new IllegalArgumentException("Usage: --diff-activities <before.json> <after.json>");
+        }
+        ActivityDiff.run(Path.of(args[i + 1]), Path.of(args[i + 2]), Path.of("data/activity-diff.txt"));
     }
 }
