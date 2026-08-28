@@ -6,19 +6,40 @@
 
     <groupId>uk.blazecraft</groupId>
     <artifactId>novabroadcast</artifactId>
-    <version>0.5-cleanroom</version>
+    <version>0.6-bedrock-auth</version>
 
     <properties>
         <maven.compiler.release>21</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <webrtc.version>0.14.0</webrtc.version>
+        <minecraftauth.version>5.0.1-20260507.085226-5</minecraftauth.version>
     </properties>
+
+    <repositories>
+        <repository>
+            <id>opencollab-releases</id>
+            <url>https://repo.opencollab.dev/maven-releases/</url>
+        </repository>
+        <repository>
+            <id>opencollab-snapshots</id>
+            <url>https://repo.opencollab.dev/maven-snapshots/</url>
+        </repository>
+        <repository>
+            <id>lenni0451-snapshots</id>
+            <url>https://maven.lenni0451.net/snapshots</url>
+        </repository>
+    </repositories>
 
     <dependencies>
         <dependency>
             <groupId>dev.onvoid.webrtc</groupId>
             <artifactId>webrtc-java</artifactId>
             <version>${webrtc.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>net.raphimc</groupId>
+            <artifactId>MinecraftAuth</artifactId>
+            <version>${minecraftauth.version}</version>
         </dependency>
     </dependencies>
 
