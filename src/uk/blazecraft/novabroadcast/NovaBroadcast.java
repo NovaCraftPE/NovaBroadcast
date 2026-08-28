@@ -147,46 +147,41 @@ public final class NovaBroadcast {
         XboxPresenceClient.print(presence);
         boolean activeTitle = presence.titles().stream().anyMatch(t -> "active".equalsIgnoreCase(t.state()));
         if (!activeTitle) {
-            System.out.println("[LivePreflight] WARN Xbox Presence does not currently report an active title. Run the capture while Minecraft is genuinely active on the account.");
+            System.out.println("[LivePreflight] WARN Xbox Presence does not currently report an active title. This is separate from title-scoped MPSD authorization.");
         }
 
         SessionDirectoryClient sessions = new SessionDirectoryClient(xbox);
-        boolean mpsdBlocked = false;
+        System.out.println("[LivePreflight] Checking configured MPSD service configuration first: scid=" +
+                config.sessionScid() + " template=" + config.sessionTemplate());
+        try {
+            sessions.preflightOnly(config);
+        } catch (Exception e) {
+            if (isMpsdServiceConfigAccessDenied(e)) {
+                System.out.println("[LivePreflight] BLOCKED configured MPSD template/service configuration is not accessible to this Xbox identity in sandbox " + config.xboxSandboxId() + ".");
+                System.out.println("[LivePreflight] RESULT: BLOCKED at title-scoped MPSD authorization. No MPSD write was attempted.");
+                return;
+            }
+            throw e;
+        }
+
+        // Activity handle queries have their own permission rules (notably private/reservation filters).
+        // They are useful diagnostics, but a 403 here must not be misreported as failure to access
+        // the already-validated title SCID/template.
         try {
             String activities = sessions.ownActivities();
-            System.out.println("[LivePreflight] Authenticated MPSD activity query succeeded; handles=" +
+            System.out.println("[LivePreflight] MPSD activity query succeeded; handles=" +
                     SessionDirectoryClient.activityCount(activities));
             SessionDirectoryClient.printActivitySummary(activities);
         } catch (Exception e) {
-            if (isMpsdServiceConfigAccessDenied(e)) {
-                mpsdBlocked = true;
-                System.out.println("[LivePreflight] BLOCKED MPSD activity access returned HTTP 403: the Xbox token is valid, but this account/app is not authorized for the requested Xbox service configuration/sandbox.");
-                System.out.println("[LivePreflight] This is not a Bedrock target, Microsoft sign-in, or query-format failure. NovaBroadcast will not guess or borrow a Minecraft SCID/title identity.");
+            String message = e.getMessage() == null ? "" : e.getMessage();
+            if (message.toLowerCase().contains("http 403")) {
+                System.out.println("[LivePreflight] WARN activity-handle query returned HTTP 403. The configured SCID/template already passed its title-scoped check; activity-query permissions will be handled separately.");
             } else {
                 throw e;
             }
         }
 
-        if (!mpsdBlocked) {
-            try {
-                sessions.preflightOnly(config);
-            } catch (Exception e) {
-                if (isMpsdServiceConfigAccessDenied(e)) {
-                    mpsdBlocked = true;
-                    System.out.println("[LivePreflight] BLOCKED configured MPSD template/service configuration is not accessible to this Xbox identity.");
-                } else {
-                    throw e;
-                }
-            }
-        }
-
-        if (mpsdBlocked) {
-            System.out.println("[LivePreflight] RESULT: BLOCKED at Xbox MPSD authorization. Read-only checks stopped safely; session.writeEnabled remains untouched and no MPSD write was attempted.");
-            System.out.println("[LivePreflight] Next requirement is an Xbox/Partner Center title identity (SCID/template/sandbox) that this app/account is actually authorized to access.");
-            return;
-        }
-
-        System.out.println("[LivePreflight] PASS read-only checks completed. This does not prove console joinability; that final claim requires an actual Xbox/Bedrock join.");
+        System.out.println("[LivePreflight] PASS title-scoped read-only MPSD checks completed. This does not prove console joinability; that final claim requires an actual Xbox/Bedrock join.");
     }
 
     private static boolean isMpsdServiceConfigAccessDenied(Exception e) {
@@ -196,7 +191,8 @@ public final class NovaBroadcast {
         return lower.contains("http 403") &&
                 (lower.contains("service config cannot be accessed") ||
                  lower.contains("service configuration") ||
-                 lower.contains("requested service config"));
+                 lower.contains("requested service config") ||
+                 lower.contains("template preflight"));
     }
 
     private static void targetCheck() throws Exception {
