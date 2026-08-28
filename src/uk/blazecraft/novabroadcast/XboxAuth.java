@@ -5,7 +5,10 @@ import java.nio.charset.StandardCharsets;
 import java.util.Map;
 
 final class XboxAuth {
-    XboxIdentity authenticate(String microsoftAccessToken, String relyingParty) throws Exception {
+    XboxIdentity authenticate(String microsoftAccessToken, String relyingParty, String sandboxId) throws Exception {
+        if (sandboxId == null || sandboxId.isBlank()) {
+            throw new IllegalArgumentException("Xbox sandbox ID must not be blank.");
+        }
         String userBody = """
 {"Properties":{"AuthMethod":"RPS","SiteName":"user.auth.xboxlive.com","RpsTicket":%s},"RelyingParty":"http://auth.xboxlive.com","TokenType":"JWT"}
 """.formatted(Json.quote("d=" + microsoftAccessToken));
@@ -23,14 +26,16 @@ final class XboxAuth {
         }
 
         String xstsBody = """
-{"Properties":{"SandboxId":"RETAIL","UserTokens":[%s]},"RelyingParty":%s,"TokenType":"JWT"}
-""".formatted(Json.quote(userToken), Json.quote(relyingParty));
+{"Properties":{"SandboxId":%s,"UserTokens":[%s]},"RelyingParty":%s,"TokenType":"JWT"}
+""".formatted(Json.quote(sandboxId), Json.quote(userToken), Json.quote(relyingParty));
 
         Http.Response xr = Http.post(
                 "https://xsts.auth.xboxlive.com/xsts/authorize",
                 xstsBody,
                 Map.of("Content-Type","application/json","x-xbl-contract-version","1"));
         xr.requireOk("Xbox XSTS authorization");
+
+        printIdentityDiagnostics(xr.body(), relyingParty, sandboxId);
 
         String xsts = Json.string(xr.body(), "Token");
         String xuid = Json.nestedString(xr.body(), "DisplayClaims", "xui", "0", "xid");
@@ -54,5 +59,29 @@ final class XboxAuth {
         } catch (Exception ignored) {}
 
         return new XboxIdentity(userHash, xsts, xuid, gt, auth);
+    }
+
+    private static void printIdentityDiagnostics(String responseBody, String relyingParty, String sandboxId) {
+        try {
+            Object root = Json.parse(responseBody);
+            if (!(root instanceof Map<?,?> map)) return;
+            Object displayObj = map.get("DisplayClaims");
+            if (!(displayObj instanceof Map<?,?> claims)) return;
+
+            boolean hasUser = claims.containsKey("xui");
+            boolean hasTitle = claims.containsKey("xti");
+            boolean hasDevice = claims.containsKey("xdi");
+            boolean hasService = claims.containsKey("xsi");
+
+            System.out.println("[XboxAuth] XSTS relying party: " + relyingParty);
+            System.out.println("[XboxAuth] XSTS sandbox requested: " + sandboxId);
+            System.out.println("[XboxAuth] DisplayClaims identities: user(xui)=" + hasUser +
+                    " title(xti)=" + hasTitle + " device(xdi)=" + hasDevice + " service(xsi)=" + hasService);
+            if (!hasTitle) {
+                System.out.println("[XboxAuth] NOTE XSTS response exposes no title identity (xti) in DisplayClaims. Token contents remain opaque and are not decoded/logged.");
+            }
+        } catch (RuntimeException ignored) {
+            System.out.println("[XboxAuth] XSTS DisplayClaims could not be inspected safely; token remains opaque.");
+        }
     }
 }

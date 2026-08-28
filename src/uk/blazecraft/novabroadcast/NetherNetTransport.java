@@ -1,18 +1,50 @@
 package uk.blazecraft.novabroadcast;
 
-import java.net.http.WebSocket;
+import java.util.concurrent.CountDownLatch;
 
-/**
- * Clean-room transport boundary for Minecraft Bedrock NetherNet/WebRTC.
- *
- * No third-party broadcaster code is used here. Future implementation will
- * own signaling, peer lifecycle, and client transfer logic.
- */
-final class NetherNetTransport {
-    private WebSocket signallingSocket;
+/** Clean-room NetherNet transport coordinator. */
+final class NetherNetTransport implements AutoCloseable {
+    static final String RELIABLE_CHANNEL = "ReliableDataChannel";
+    static final String UNRELIABLE_CHANNEL = "UnreliableDataChannel";
 
-    void start() {
-        throw new UnsupportedOperationException(
-                "NetherNet transport is not implemented in v0.1.");
+    private final CountDownLatch stopped = new CountDownLatch(1);
+    private NetherNetSignalingServer signaling;
+    private WebRtcPeerBackend backend;
+
+    void start(AppConfig config) throws Exception {
+        if (!config.netherNetEnabled()) return;
+        if (signaling != null) return;
+
+        backend = new WebRtcPeerBackend(config);
+        signaling = new NetherNetSignalingServer(
+                config.netherNetListenHost(),
+                config.netherNetListenPort(),
+                config.netherNetMaxSdpBytes(),
+                backend);
+        signaling.start();
+
+        System.out.println("[NetherNet] Native WebRTC peer backend initialized.");
+        System.out.println("[NetherNet] Expected channels: " + RELIABLE_CHANNEL + ", " + UNRELIABLE_CHANNEL);
+        System.out.println("[NetherNet] ICE UDP range: " + config.netherNetIceMinPort() + "-" + config.netherNetIceMaxPort());
+        if (!config.netherNetStunUrl().isBlank()) {
+            System.out.println("[NetherNet] STUN: " + config.netherNetStunUrl());
+        }
+    }
+
+    void await() throws InterruptedException {
+        stopped.await();
+    }
+
+    @Override
+    public void close() {
+        if (signaling != null) {
+            signaling.close();
+            signaling = null;
+        }
+        if (backend != null) {
+            backend.close();
+            backend = null;
+        }
+        stopped.countDown();
     }
 }

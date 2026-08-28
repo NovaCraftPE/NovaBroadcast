@@ -1,15 +1,56 @@
 package uk.blazecraft.novabroadcast;
 
 import java.nio.file.*;
+import java.util.Arrays;
+import java.util.List;
 
 public final class NovaBroadcast {
-    public static final String VERSION = "0.1-cleanroom";
+    public static final String VERSION = "0.6-bedrock-auth";
 
     public static void main(String[] args) {
-        System.out.println("NovaBroadcast " + VERSION);
-        System.out.println("Independent Java implementation - no MCXboxBroadcast runtime/source dependency.");
-
         try {
+            if (Arrays.asList(args).contains("--self-test")) {
+                SelfTest.run();
+                BedrockRedirectSelfTest.run();
+                ActivityDiffSelfTest.run();
+                BedrockTargetProbeSelfTest.run();
+                XboxPresenceSelfTest.run();
+                return;
+            }
+            if (Arrays.asList(args).contains("--webrtc-smoke-test")) {
+                SelfTest.runNativeWebRtc();
+                return;
+            }
+            if (Arrays.asList(args).contains("--config-check")) {
+                ConfigCheck.run(Path.of("config.properties"));
+                return;
+            }
+            if (Arrays.asList(args).contains("--target-check")) {
+                targetCheck();
+                return;
+            }
+            if (Arrays.asList(args).contains("--minecraft-auth-preflight")) {
+                AppConfig config = AppConfig.load(Path.of("config.properties"));
+                MinecraftMpsdPreflight.run(config);
+                return;
+            }
+            if (Arrays.asList(args).contains("--prepare-activity-import")) {
+                prepareActivityImport();
+                return;
+            }
+            if (Arrays.asList(args).contains("--diff-activities")) {
+                diffActivities(args);
+                return;
+            }
+            if (Arrays.asList(args).contains("--diff-last-activities")) {
+                ActivityDiff.run(Path.of("data/mpsd-activities-previous.json"),
+                        Path.of("data/mpsd-activities.json"), Path.of("data/activity-diff.txt"));
+                return;
+            }
+
+            System.out.println("NovaBroadcast " + VERSION);
+            System.out.println("Independent NovaBroadcast implementation with public interoperability libraries.");
+
             AppConfig config = AppConfig.load(Path.of("config.properties"));
             if (config.clientId().isBlank()) {
                 System.out.println();
@@ -23,32 +64,174 @@ public final class NovaBroadcast {
             MicrosoftTokens msa = microsoft.getTokens();
 
             XboxAuth xboxAuth = new XboxAuth();
-            XboxIdentity xbox = xboxAuth.authenticate(msa.accessToken(), config.xboxRelyingParty());
+            System.out.println("[Xbox] Requesting XSTS for sandbox: " + config.xboxSandboxId());
+            XboxIdentity xbox = xboxAuth.authenticate(msa.accessToken(), config.xboxRelyingParty(), config.xboxSandboxId());
 
             System.out.println("[Xbox] Authenticated.");
-            if (!xbox.gamertag().isBlank()) {
-                System.out.println("[Xbox] Gamertag: " + xbox.gamertag());
-            }
-            if (!xbox.xuid().isBlank()) {
-                System.out.println("[Xbox] XUID: " + xbox.xuid());
-            }
+            if (!xbox.gamertag().isBlank()) System.out.println("[Xbox] Gamertag: " + xbox.gamertag());
+            if (!xbox.xuid().isBlank()) System.out.println("[Xbox] XUID: " + xbox.xuid());
 
-            if (!config.sessionEnabled()) {
-                System.out.println();
-                System.out.println("[Session] Clean-room MPSD/NetherNet implementation is disabled in v0.1.");
-                System.out.println("[Session] Authentication/core milestone completed successfully.");
+            if (Arrays.asList(args).contains("--live-preflight")) {
+                livePreflight(config, xbox);
                 return;
             }
 
-            SessionDirectoryClient sessions = new SessionDirectoryClient(xbox);
-            sessions.start(config);
+            boolean dumpActivities = Arrays.asList(args).contains("--dump-activities");
+            boolean discoverSession = Arrays.asList(args).contains("--discover-session");
+            if (dumpActivities || discoverSession) {
+                Path current = Path.of("data/mpsd-activities.json");
+                Path previous = Path.of("data/mpsd-activities-previous.json");
+                if (Files.isRegularFile(current)) {
+                    Files.createDirectories(previous.toAbsolutePath().getParent());
+                    Files.copy(current, previous, StandardCopyOption.REPLACE_EXISTING);
+                    System.out.println("[Session] Preserved previous activity dump at " + previous.toAbsolutePath());
+                }
+                SessionDirectoryClient sessions = new SessionDirectoryClient(xbox);
+                sessions.dumpOwnActivities(current);
+                System.out.println("[NovaBroadcast] Activity discovery complete. No session was created or modified.");
+                if (discoverSession) {
+                    prepareActivityImport();
+                    if (Files.isRegularFile(previous)) {
+                        ActivityDiff.run(previous, current, Path.of("data/activity-diff.txt"));
+                        System.out.println("[NovaBroadcast] Consecutive discovery comparison completed automatically.");
+                    } else {
+                        System.out.println("[NovaBroadcast] First discovery saved. Run --discover-session again during another Minecraft activity to generate a diff.");
+                    }
+                } else if (Files.isRegularFile(previous)) {
+                    System.out.println("[NovaBroadcast] Compare the last two captures with --diff-last-activities.");
+                }
+                return;
+            }
 
+            MpsdSessionLease sessionLease = null;
+            try (NetherNetTransport transport = new NetherNetTransport()) {
+                transport.start(config);
+
+                if (config.sessionEnabled()) {
+                    SessionDirectoryClient sessions = new SessionDirectoryClient(xbox);
+                    if (sessions.start(config)) sessionLease = new MpsdSessionLease(sessions, config);
+                } else {
+                    System.out.println();
+                    System.out.println("[Session] MPSD advertising is disabled.");
+                }
+
+                if (config.netherNetEnabled()) {
+                    System.out.println("[NovaBroadcast] NetherNet signaling/WebRTC service is running. Press Ctrl+C to stop.");
+                    transport.await();
+                } else {
+                    System.out.println("[NovaBroadcast] Authentication/core milestone completed successfully.");
+                }
+            } finally {
+                if (sessionLease != null) sessionLease.close();
+            }
+
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            System.out.println("[NovaBroadcast] Stopped.");
         } catch (Exception e) {
             System.err.println("[NovaBroadcast] " + e.getMessage());
-            if (Boolean.getBoolean("novabroadcast.debug")) {
-                e.printStackTrace();
-            }
+            if (Boolean.getBoolean("novabroadcast.debug")) e.printStackTrace();
             System.exit(1);
         }
+    }
+
+    private static void livePreflight(AppConfig config, XboxIdentity xbox) throws Exception {
+        System.out.println("[LivePreflight] Running read-only readiness checks. No MPSD session will be published.");
+        System.out.println("[LivePreflight] Xbox sandbox: " + config.xboxSandboxId());
+        BedrockTargetProbe.Result target = BedrockTargetProbe.probe(config.targetHost(), config.targetPort(), 3000);
+        System.out.println("[LivePreflight] Target: " + target.motd() + " / " + target.version() +
+                " / protocol " + target.protocol());
+        int expected = BedrockProtocolVersions.requireProtocol(config.bedrockGameVersion());
+        if (target.protocol() != expected) {
+            throw new IllegalStateException("[LivePreflight] FAIL target advertises protocol " + target.protocol() +
+                    " but bedrock.gameVersion=" + config.bedrockGameVersion() + " expects " + expected);
+        }
+        System.out.println("[LivePreflight] Target protocol matches configured redirect version.");
+
+        XboxPresenceClient.Presence presence = new XboxPresenceClient(xbox).read();
+        XboxPresenceClient.print(presence);
+        boolean activeTitle = presence.titles().stream().anyMatch(t -> "active".equalsIgnoreCase(t.state()));
+        if (!activeTitle) {
+            System.out.println("[LivePreflight] WARN Xbox Presence does not currently report an active title. This is separate from title-scoped MPSD authorization.");
+        }
+
+        SessionDirectoryClient sessions = new SessionDirectoryClient(xbox);
+        System.out.println("[LivePreflight] Checking configured MPSD service configuration first: scid=" +
+                config.sessionScid() + " template=" + config.sessionTemplate());
+        try {
+            sessions.preflightOnly(config);
+        } catch (Exception e) {
+            if (isMpsdServiceConfigAccessDenied(e)) {
+                System.out.println("[LivePreflight] BLOCKED configured MPSD template/service configuration is not accessible to this Xbox identity in sandbox " + config.xboxSandboxId() + ".");
+                System.out.println("[LivePreflight] RESULT: BLOCKED at title-scoped MPSD authorization. No MPSD write was attempted.");
+                return;
+            }
+            throw e;
+        }
+
+        try {
+            String activities = sessions.ownActivities();
+            System.out.println("[LivePreflight] MPSD activity query succeeded; handles=" +
+                    SessionDirectoryClient.activityCount(activities));
+            SessionDirectoryClient.printActivitySummary(activities);
+        } catch (Exception e) {
+            String message = e.getMessage() == null ? "" : e.getMessage();
+            if (message.toLowerCase().contains("http 403")) {
+                System.out.println("[LivePreflight] WARN activity-handle query returned HTTP 403. The configured SCID/template already passed its title-scoped check; activity-query permissions will be handled separately.");
+            } else {
+                throw e;
+            }
+        }
+
+        System.out.println("[LivePreflight] PASS title-scoped read-only MPSD checks completed. This does not prove console joinability; that final claim requires an actual Xbox/Bedrock join.");
+    }
+
+    private static boolean isMpsdServiceConfigAccessDenied(Exception e) {
+        String message = e.getMessage();
+        if (message == null) return false;
+        String lower = message.toLowerCase();
+        return lower.contains("http 403") &&
+                (lower.contains("service config cannot be accessed") ||
+                 lower.contains("service configuration") ||
+                 lower.contains("requested service config") ||
+                 lower.contains("template preflight"));
+    }
+
+    private static void targetCheck() throws Exception {
+        AppConfig config = AppConfig.load(Path.of("config.properties"));
+        System.out.println("[TargetCheck] Probing " + config.targetHost() + ":" + config.targetPort() + " over RakNet UDP...");
+        BedrockTargetProbe.Result result = BedrockTargetProbe.probe(config.targetHost(), config.targetPort(), 3000);
+        System.out.println("[TargetCheck] MOTD: " + result.motd());
+        System.out.println("[TargetCheck] Edition: " + result.edition());
+        System.out.println("[TargetCheck] Version: " + result.version() + " / protocol " + result.protocol());
+        System.out.println("[TargetCheck] Players: " + result.players() + "/" + result.maxPlayers());
+        int expected = BedrockProtocolVersions.requireProtocol(config.bedrockGameVersion());
+        if (result.protocol() != expected) {
+            throw new IllegalStateException("[TargetCheck] FAIL target advertises protocol " + result.protocol() +
+                    " but bedrock.gameVersion=" + config.bedrockGameVersion() + " expects " + expected);
+        }
+        System.out.println("[TargetCheck] PASS target is reachable and protocol matches the configured redirect version.");
+    }
+
+    private static void prepareActivityImport() throws Exception {
+        Path dump = Path.of("data/mpsd-activities.json");
+        Path output = Path.of("data/activity-import");
+        List<Path> candidates = ActivityImport.prepare(dump, output);
+        System.out.println("[ActivityImport] Prepared " + candidates.size() + " candidate(s) under " + output.toAbsolutePath());
+        for (Path candidate : candidates) {
+            System.out.println("[ActivityImport] " + candidate.resolve("session.properties").toAbsolutePath());
+        }
+        if (candidates.isEmpty()) {
+            System.out.println("[ActivityImport] No complete sessionRef candidates were present in the dump.");
+        }
+        System.out.println("[ActivityImport] Main config was not modified and publishing remains disabled.");
+    }
+
+    private static void diffActivities(String[] args) throws Exception {
+        int i = Arrays.asList(args).indexOf("--diff-activities");
+        if (i < 0 || i + 2 >= args.length) {
+            throw new IllegalArgumentException("Usage: --diff-activities <before.json> <after.json>");
+        }
+        ActivityDiff.run(Path.of(args[i + 1]), Path.of(args[i + 2]), Path.of("data/activity-diff.txt"));
     }
 }

@@ -1,0 +1,116 @@
+name: Build NovaBroadcast
+
+on:
+  push:
+    branches: [ main, "develop/**" ]
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: write
+
+# A newer push to the same branch supersedes an older build. This prevents two
+# successful push runs from racing to replace the development-latest release.
+concurrency:
+  group: novabroadcast-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Install WebRTC Linux runtime libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libpulse0 \
+            libx11-6 \
+            libxext6 \
+            libxfixes3 \
+            libxi6 \
+            libxrandr2 \
+            libxrender1 \
+            libxdamage1 \
+            libxcomposite1 \
+            libxtst6 \
+            libnss3 \
+            libasound2t64 \
+            libgbm1 \
+            libglib2.0-0
+
+      - name: Build
+        run: bash build.sh
+
+      - name: Verify JAR
+        run: test -s NovaBroadcast.jar
+
+      - name: Self-test
+        run: java -jar NovaBroadcast.jar --self-test
+
+      - name: Config preflight
+        run: java -jar NovaBroadcast.jar --config-check
+
+      - name: Kastle WebRTC JNI smoke test
+        run: java -cp NovaBroadcast.jar uk.blazecraft.novabroadcast.KastleWebRtcSmokeTest
+
+      - name: Upload tested JAR artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: NovaBroadcast-${{ github.sha }}
+          path: NovaBroadcast.jar
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Publish direct development JAR
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/develop/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          # Fail closed if another commit reached this branch while this run was
+          # executing. Only the current branch head may replace development-latest.
+          git fetch origin "$GITHUB_REF_NAME"
+          CURRENT_HEAD="$(git rev-parse "origin/$GITHUB_REF_NAME")"
+          if [ "$CURRENT_HEAD" != "$GITHUB_SHA" ]; then
+            echo "Skipping development release: $GITHUB_SHA is stale; branch head is $CURRENT_HEAD"
+            exit 0
+          fi
+
+          # Remove any previous release object using this tag, including a draft that
+          # GitHub may expose through an untagged-* URL.
+          for RELEASE_ID in $(gh api "/repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq '.[] | select(.tag_name == "development-latest") | .id'); do
+            gh api --method DELETE "/repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID"
+          done
+
+          git push origin :refs/tags/development-latest 2>/dev/null || true
+          git tag -f development-latest "$GITHUB_SHA"
+          git push origin refs/tags/development-latest --force
+
+          gh release create development-latest NovaBroadcast.jar \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "NovaBroadcast Development Build" \
+            --notes "Tested development build from commit $GITHUB_SHA. Download NovaBroadcast.jar directly from Assets." \
+            --prerelease
+
+          # Explicitly force the release visible. If GitHub ever creates it as a draft,
+          # this converts it before the workflow is considered successful.
+          gh api --method PATCH "/repos/$GITHUB_REPOSITORY/releases/tags/development-latest" \
+            -f draft=false \
+            -f prerelease=true >/dev/null
+
+          IS_DRAFT="$(gh api "/repos/$GITHUB_REPOSITORY/releases/tags/development-latest" --jq '.draft')"
+          if [ "$IS_DRAFT" != "false" ]; then
+            echo "Release publication failed: development-latest is still a draft"
+            exit 1
+          fi

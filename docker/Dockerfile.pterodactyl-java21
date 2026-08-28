@@ -1,0 +1,23 @@
+FROM ghcr.io/pterodactyl/yolks:java_21
+
+USER root
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        libpulse0 \
+        libx11-6 \
+        libxext6 \
+        libxfixes3 \
+        libxi6 \
+        libxrandr2 \
+        libxrender1 \
+        libxdamage1 \
+        libxcomposite1 \
+        libxtst6 \
+        libnss3 \
+        libasound2t64 \
+        libgbm1 \
+        libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+
+USER container
