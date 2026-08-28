@@ -18,6 +18,7 @@ final class SelfTest {
         testBedrockBatchCodec();
         testRedirectProtocolPackets();
         testActivityHandleDocument();
+        testActivityImport();
         testNetherNetIdentity();
         System.out.println("[SelfTest] Core tests passed.");
     }
@@ -168,6 +169,40 @@ final class SelfTest {
             Files.deleteIfExists(file);
         } catch (Exception e) {
             throw new IllegalStateException("Self-test failed: MPSD activity handle", e);
+        }
+    }
+
+    private static void testActivityImport() {
+        try {
+            String dump = "{" +
+                    "\"results\":[{" +
+                    "\"titleId\":\"123\"," +
+                    "\"sessionRef\":{\"scid\":\"scid-a\",\"templateName\":\"tmpl-a\",\"name\":\"session-a\"}," +
+                    "\"session\":{" +
+                    "\"properties\":{\"custom\":{\"networkId\":\"abc\",\"enabled\":true}}," +
+                    "\"members\":{" +
+                    "\"1\":{\"properties\":{\"custom\":{\"role\":\"host\"}}}," +
+                    "\"2\":{\"properties\":{\"custom\":{\"role\":\"host\"}}}" +
+                    "}}}]}";
+            List<ActivityImport.Candidate> candidates = ActivityImport.parse(dump);
+            require(candidates.size() == 1, "activity import candidate count");
+            ActivityImport.Candidate c = candidates.get(0);
+            require("scid-a".equals(c.scid()) && "tmpl-a".equals(c.templateName()) && "session-a".equals(c.sessionName()),
+                    "activity import sessionRef");
+            require("abc".equals(c.sessionCustom().get("networkId")), "activity import session custom");
+            require("host".equals(c.memberCustom().get("role")), "activity import unambiguous member custom");
+            require("{\"networkId\":\"abc\",\"enabled\":true}".equals(Json.stringify(c.sessionCustom())),
+                    "deterministic extracted JSON");
+
+            String ambiguous = dump.replace("{\"role\":\"host\"}}}}]}\"", "{\"role\":\"guest\"}}}}]}\"");
+            // Explicit second sample avoids relying on textual shape if the first fixture changes.
+            ambiguous = "{\"results\":[{\"sessionRef\":{\"scid\":\"s\",\"templateName\":\"t\",\"name\":\"n\"}," +
+                    "\"session\":{\"members\":{\"1\":{\"properties\":{\"custom\":{\"role\":\"host\"}}}," +
+                    "\"2\":{\"properties\":{\"custom\":{\"role\":\"guest\"}}}}}}]}";
+            require(ActivityImport.parse(ambiguous).get(0).memberCustom().isEmpty(),
+                    "ambiguous member custom must not be guessed");
+        } catch (Exception e) {
+            throw new IllegalStateException("Self-test failed: MPSD activity import", e);
         }
     }
 
