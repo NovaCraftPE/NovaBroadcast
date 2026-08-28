@@ -10,6 +10,8 @@ final class BedrockRedirectSelfTest {
             testMalformedLoginIsRejected();
             testRedirectFlow("1.26.44", 2168);
             testRedirectFlow("1.26.45", 2169);
+            testDirectNetherNetFlow("1.26.44", 2168);
+            testDirectNetherNetFlow("1.26.45", 2169);
         } catch (Exception e) {
             throw new IllegalStateException("Self-test failed: Bedrock redirect", e);
         }
@@ -88,6 +90,39 @@ final class BedrockRedirectSelfTest {
         require(Arrays.equals(BedrockTransferEncoder.encodePacket(protocol, "127.0.0.1", 19132, false),
                         transferReply.packets().get(0)),
                 gameVersion + " TransferPacket differs from verified encoder");
+    }
+
+    private static void testDirectNetherNetFlow(String gameVersion, int protocol) throws Exception {
+        List<byte[]> sent = new ArrayList<>();
+        BedrockRedirectSession session = new BedrockRedirectSession(
+                "127.0.0.1", 19132, gameVersion, true, true, sent::add);
+
+        session.accept(requestNetworkSettings(protocol));
+        require(session.directPacketTransport(), "direct transport flag missing");
+        require(!session.compressionNegotiated(), "direct NetherNet mode must not add RakNet compression framing");
+        require(session.stage() == BedrockRedirectSession.Stage.NETWORK_SETTINGS_SENT,
+                "direct NetherNet NetworkSettings stage");
+        require(Arrays.equals(sent.get(0), BedrockRedirectProtocol.networkSettingsNone()),
+                "direct NetherNet NetworkSettings must be one raw packet");
+
+        session.accept(loginPacket(protocol, "signed-connection-request"));
+        require(session.stage() == BedrockRedirectSession.Stage.LOGIN_ACCEPTED,
+                "direct NetherNet login stage");
+        require(sent.size() == 3, "direct login must emit PlayStatus and ResourcePacksInfo separately");
+        require(BedrockRedirectProtocol.packetId(sent.get(1)) == 2, "direct login PlayStatus missing");
+        require(BedrockRedirectProtocol.packetId(sent.get(2)) == 6, "direct login ResourcePacksInfo missing");
+
+        session.accept(resourcePackResponse(2, "downloadingfinished"));
+        require(session.stage() == BedrockRedirectSession.Stage.PACK_STACK_SENT,
+                "direct NetherNet pack-stack stage");
+        require(BedrockRedirectProtocol.packetId(sent.get(3)) == 7, "direct ResourcePackStack missing");
+
+        session.accept(resourcePackResponse(3, "resourcepackstackfinished"));
+        require(session.stage() == BedrockRedirectSession.Stage.TRANSFER_SENT,
+                "direct NetherNet transfer stage");
+        require(BedrockRedirectProtocol.packetId(sent.get(4)) == 85, "direct TransferPacket missing");
+        require(Arrays.equals(sent.get(4), BedrockTransferEncoder.encodePacket(protocol, "127.0.0.1", 19132, false)),
+                "direct TransferPacket bytes mismatch");
     }
 
     private static byte[] requestNetworkSettings(int protocol) {
