@@ -39,3 +39,11 @@ jobs:
 
       - name: Native WebRTC smoke test
         run: java -jar NovaBroadcast.jar --webrtc-smoke-test
+
+      - name: Upload tested JAR
+        uses: actions/upload-artifact@v4
+        with:
+          name: NovaBroadcast-${{ github.sha }}
+          path: NovaBroadcast.jar
+          if-no-files-found: error
+          retention-days: 14
