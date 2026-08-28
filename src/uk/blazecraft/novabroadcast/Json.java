@@ -39,13 +39,59 @@ final class Json {
             switch (c) {
                 case '"' -> b.append("\\\"");
                 case '\\' -> b.append("\\\\");
+                case '\b' -> b.append("\\b");
+                case '\f' -> b.append("\\f");
                 case '\n' -> b.append("\\n");
                 case '\r' -> b.append("\\r");
                 case '\t' -> b.append("\\t");
-                default -> b.append(c);
+                default -> {
+                    if (c < 0x20) b.append(String.format("\\u%04x", (int) c));
+                    else b.append(c);
+                }
             }
         }
         return b.append('"').toString();
+    }
+
+    /** Deterministic compact JSON used for extracted MPSD custom-property files. */
+    static String stringify(Object value) {
+        if (value == null) return "null";
+        if (value instanceof String s) return quote(s);
+        if (value instanceof Boolean || value instanceof Byte || value instanceof Short ||
+                value instanceof Integer || value instanceof Long) return String.valueOf(value);
+        if (value instanceof Float f) {
+            if (!Float.isFinite(f)) throw new IllegalArgumentException("Non-finite JSON number");
+            return String.valueOf(f);
+        }
+        if (value instanceof Double d) {
+            if (!Double.isFinite(d)) throw new IllegalArgumentException("Non-finite JSON number");
+            return String.valueOf(d);
+        }
+        if (value instanceof Number n) return String.valueOf(n);
+        if (value instanceof Map<?,?> map) {
+            StringBuilder b = new StringBuilder("{");
+            boolean first = true;
+            for (Map.Entry<?,?> e : map.entrySet()) {
+                if (!(e.getKey() instanceof String key)) {
+                    throw new IllegalArgumentException("JSON object key is not a string");
+                }
+                if (!first) b.append(',');
+                first = false;
+                b.append(quote(key)).append(':').append(stringify(e.getValue()));
+            }
+            return b.append('}').toString();
+        }
+        if (value instanceof Iterable<?> values) {
+            StringBuilder b = new StringBuilder("[");
+            boolean first = true;
+            for (Object item : values) {
+                if (!first) b.append(',');
+                first = false;
+                b.append(stringify(item));
+            }
+            return b.append(']').toString();
+        }
+        throw new IllegalArgumentException("Unsupported JSON value: " + value.getClass().getName());
     }
 
     private static final class Parser {
