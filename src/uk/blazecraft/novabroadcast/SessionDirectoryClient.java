@@ -2,17 +2,12 @@ package uk.blazecraft.novabroadcast;
 
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-/**
- * Clean-room Xbox Multiplayer Session Directory client.
- *
- * Title-specific Minecraft constants/custom properties and NetherNet network
- * identity are intentionally not embedded here. Until those are implemented,
- * NovaBroadcast can validate and render the base session write but refuses to
- * publish a misleading joinable session.
- */
+/** Clean-room Xbox Multiplayer Session Directory client. */
 final class SessionDirectoryClient {
     private static final String MPSD = "https://sessiondirectory.xboxlive.com";
     private final XboxIdentity identity;
@@ -26,12 +21,16 @@ final class SessionDirectoryClient {
 
         System.out.println();
         System.out.println("[Session] Running MPSD preflight...");
-        validateTemplate(config);
+        TemplateInfo template = validateTemplate(config);
         System.out.println("[Session] MPSD template is reachable with the authenticated account.");
+        System.out.println("[Session] Template visibility=" + template.visibility() +
+                " connectivity=" + template.connectivity() + " gameplay=" + template.gameplay());
         System.out.println("[Session] Session URI: " + sessionUri(config));
 
-        String document = SessionDocument.activeMember(identity);
-        System.out.println("[Session] Base session document: " + document);
+        String sessionCustom = readJsonObject(config.sessionCustomPropertiesFile(), "session custom properties");
+        String memberCustom = readJsonObject(config.sessionMemberCustomPropertiesFile(), "member custom properties");
+        String document = SessionDocument.activeMember(identity, sessionCustom, memberCustom);
+        System.out.println("[Session] Session document prepared.");
 
         if (!config.sessionWriteEnabled()) {
             System.out.println("[Session] Dry-run complete. session.writeEnabled=false, so no MPSD session was written.");
@@ -39,20 +38,27 @@ final class SessionDirectoryClient {
         }
 
         if (!config.netherNetEnabled()) {
-            throw new UnsupportedOperationException(
-                    "Live MPSD writes are blocked until NetherNet is enabled and its Minecraft session fields are implemented. " +
-                    "This prevents NovaBroadcast from advertising an unreachable session.");
+            throw new IllegalStateException("Live MPSD writes require nethernet.enabled=true.");
+        }
+        if (!config.bedrockRedirectEnabled()) {
+            throw new IllegalStateException("Live MPSD writes require bedrock.redirectEnabled=true so joined clients have a working redirect path.");
+        }
+        if (!template.connectivity()) {
+            throw new IllegalStateException("The selected MPSD template does not advertise connectivity capability.");
+        }
+        if (config.sessionCustomPropertiesFile().isBlank()) {
+            throw new IllegalStateException(
+                    "Live MPSD publication requires session.customPropertiesFile with title-authorized Minecraft session metadata. " +
+                    "NovaBroadcast will not invent private Minecraft custom-property names.");
         }
 
-        throw new UnsupportedOperationException(
-                "NetherNet/WebRTC transport is not implemented yet; refusing to publish the session.");
+        Http.Response created = create(config, document);
+        if (!created.ok()) {
+            throw new IllegalStateException("MPSD session create failed: HTTP " + created.status() + " " + created.body());
+        }
+        System.out.println("[Session] MPSD session published successfully.");
     }
 
-    /**
-     * Lifecycle primitive for the later transport milestone. Creates a new
-     * session only; If-None-Match prevents accidentally replacing an existing
-     * session with the same name.
-     */
     Http.Response create(AppConfig config, String document) throws Exception {
         Map<String,String> h = writeHeaders();
         h.put("If-None-Match", "*");
@@ -63,12 +69,11 @@ final class SessionDirectoryClient {
         return Http.get(sessionUri(config), headers());
     }
 
-    /** Remove the authenticated caller from the session. */
     Http.Response leave(AppConfig config) throws Exception {
         return Http.delete(sessionUri(config) + "/members/me", headers());
     }
 
-    private void validateTemplate(AppConfig config) throws Exception {
+    private TemplateInfo validateTemplate(AppConfig config) throws Exception {
         String url = MPSD + "/serviceconfigs/" + encode(config.sessionScid()) +
                 "/sessiontemplates/" + encode(config.sessionTemplate());
         Http.Response response = Http.get(url, headers());
@@ -77,6 +82,39 @@ final class SessionDirectoryClient {
                     "MPSD template preflight failed: HTTP " + response.status() +
                     ". Check that session.scid/session.template are correct and authorized for this account/title.");
         }
+        return parseTemplate(response.body());
+    }
+
+    private static TemplateInfo parseTemplate(String json) {
+        try {
+            Object root = Json.parse(json);
+            if (!(root instanceof Map<?,?> map)) return new TemplateInfo("unknown", false, false);
+            Object constantsObj = map.get("constants");
+            if (!(constantsObj instanceof Map<?,?> constants)) return new TemplateInfo("unknown", false, false);
+            Object systemObj = constants.get("system");
+            if (!(systemObj instanceof Map<?,?> system)) return new TemplateInfo("unknown", false, false);
+            String visibility = String.valueOf(system.getOrDefault("visibility", "open"));
+            boolean connectivity = false;
+            boolean gameplay = false;
+            Object capabilitiesObj = system.get("capabilities");
+            if (capabilitiesObj instanceof Map<?,?> capabilities) {
+                connectivity = Boolean.TRUE.equals(capabilities.get("connectivity"));
+                gameplay = Boolean.TRUE.equals(capabilities.get("gameplay"));
+            }
+            return new TemplateInfo(visibility, connectivity, gameplay);
+        } catch (RuntimeException e) {
+            return new TemplateInfo("unknown", false, false);
+        }
+    }
+
+    private static String readJsonObject(String file, String label) throws Exception {
+        if (file == null || file.isBlank()) return "{}";
+        Path path = Path.of(file);
+        if (!Files.exists(path)) throw new IllegalStateException(label + " file not found: " + path);
+        String json = Files.readString(path).trim();
+        Object value = Json.parse(json);
+        if (!(value instanceof Map<?,?>)) throw new IllegalStateException(label + " file must contain one JSON object: " + path);
+        return json;
     }
 
     private Map<String,String> headers() {
@@ -94,15 +132,9 @@ final class SessionDirectoryClient {
     }
 
     private static void requireConfigured(AppConfig config) {
-        if (config.sessionScid().isBlank()) {
-            throw new IllegalStateException("session.enabled=true but session.scid is blank.");
-        }
-        if (config.sessionTemplate().isBlank()) {
-            throw new IllegalStateException("session.enabled=true but session.template is blank.");
-        }
-        if (config.sessionName().isBlank()) {
-            throw new IllegalStateException("session.enabled=true but session.name is blank.");
-        }
+        if (config.sessionScid().isBlank()) throw new IllegalStateException("session.enabled=true but session.scid is blank.");
+        if (config.sessionTemplate().isBlank()) throw new IllegalStateException("session.enabled=true but session.template is blank.");
+        if (config.sessionName().isBlank()) throw new IllegalStateException("session.enabled=true but session.name is blank.");
     }
 
     static String sessionUri(AppConfig config) {
@@ -114,4 +146,6 @@ final class SessionDirectoryClient {
     private static String encode(String value) {
         return URLEncoder.encode(value, StandardCharsets.UTF_8).replace("+", "%20");
     }
+
+    private record TemplateInfo(String visibility, boolean connectivity, boolean gameplay) {}
 }
