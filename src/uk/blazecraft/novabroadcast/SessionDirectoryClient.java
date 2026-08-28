@@ -34,6 +34,9 @@ final class SessionDirectoryClient {
 
         if (!config.sessionWriteEnabled()) {
             System.out.println("[Session] Dry-run complete. session.writeEnabled=false, so no MPSD session was written.");
+            if (config.sessionSetActivity()) {
+                System.out.println("[Session] session.setActivity=true ignored during dry-run.");
+            }
             return;
         }
 
@@ -57,6 +60,16 @@ final class SessionDirectoryClient {
             throw new IllegalStateException("MPSD session create failed: HTTP " + created.status() + " " + created.body());
         }
         System.out.println("[Session] MPSD session published successfully.");
+
+        if (config.sessionSetActivity()) {
+            Http.Response activity = setActivity(config);
+            if (!activity.ok()) {
+                throw new IllegalStateException("MPSD activity handle create failed: HTTP " + activity.status() + " " + activity.body());
+            }
+            System.out.println("[Session] Xbox activity handle now points to the published session.");
+        } else {
+            System.out.println("[Session] Activity handle not changed (session.setActivity=false).");
+        }
     }
 
     Http.Response create(AppConfig config, String document) throws Exception {
@@ -71,6 +84,22 @@ final class SessionDirectoryClient {
 
     Http.Response leave(AppConfig config) throws Exception {
         return Http.delete(sessionUri(config) + "/members/me", headers());
+    }
+
+    Http.Response setActivity(AppConfig config) throws Exception {
+        return Http.post(MPSD + "/handles", activityHandleDocument(config), writeHeaders());
+    }
+
+    static String activityHandleDocument(AppConfig config) {
+        return "{" +
+                "\"version\":1," +
+                "\"type\":\"activity\"," +
+                "\"sessionRef\":{" +
+                    "\"scid\":" + Json.quote(config.sessionScid()) + "," +
+                    "\"templateName\":" + Json.quote(config.sessionTemplate()) + "," +
+                    "\"name\":" + Json.quote(config.sessionName()) +
+                "}" +
+            "}";
     }
 
     private TemplateInfo validateTemplate(AppConfig config) throws Exception {
