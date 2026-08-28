@@ -37,6 +37,16 @@
             <artifactId>webrtc-java</artifactId>
             <version>${webrtc.version}</version>
         </dependency>
+        <!-- webrtc-java keeps native binaries in platform-classified artifacts. Keep
+             the Java API and Linux native library on exactly the same version so JNI
+             symbols (for example PeerConnectionFactory.initialize) cannot drift. -->
+        <dependency>
+            <groupId>dev.onvoid.webrtc</groupId>
+            <artifactId>webrtc-java</artifactId>
+            <version>${webrtc.version}</version>
+            <classifier>linux-x86_64</classifier>
+            <scope>runtime</scope>
+        </dependency>
         <dependency>
             <groupId>net.raphimc</groupId>
             <artifactId>MinecraftAuth</artifactId>
