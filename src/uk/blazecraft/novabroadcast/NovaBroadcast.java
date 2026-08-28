@@ -12,6 +12,7 @@ public final class NovaBroadcast {
             if (Arrays.asList(args).contains("--self-test")) {
                 SelfTest.run();
                 BedrockRedirectSelfTest.run();
+                ActivityDiffSelfTest.run();
                 return;
             }
             if (Arrays.asList(args).contains("--webrtc-smoke-test")) {
