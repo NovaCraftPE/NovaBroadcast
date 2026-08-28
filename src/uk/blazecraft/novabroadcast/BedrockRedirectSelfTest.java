@@ -7,6 +7,7 @@ final class BedrockRedirectSelfTest {
         try {
             testDisabledIsDiagnosticOnly();
             testProtocolMismatchIsRejected();
+            testMalformedLoginIsRejected();
             test2168RedirectFlow();
         } catch (Exception e) {
             throw new IllegalStateException("Self-test failed: Bedrock redirect", e);
@@ -32,6 +33,18 @@ final class BedrockRedirectSelfTest {
         require(session.configuredProtocol() == 2168, "1.26.44 must map to protocol 2168");
     }
 
+    private static void testMalformedLoginIsRejected() throws Exception {
+        List<byte[]> sent = new ArrayList<>();
+        BedrockRedirectSession session = new BedrockRedirectSession(
+                "127.0.0.1", 19132, "1.26.44", true, sent::add);
+        session.accept(BedrockBatchCodec.encodeSingle(requestNetworkSettings(2168), true, false));
+        int before = sent.size();
+        session.accept(BedrockBatchCodec.encodeSingle(new byte[] {0x01}, true, true));
+        require(sent.size() == before, "malformed Login emitted a response");
+        require(session.stage() == BedrockRedirectSession.Stage.NETWORK_SETTINGS_SENT,
+                "malformed Login advanced redirect stage");
+    }
+
     private static void test2168RedirectFlow() throws Exception {
         List<byte[]> sent = new ArrayList<>();
         BedrockRedirectSession session = new BedrockRedirectSession(
@@ -47,7 +60,7 @@ final class BedrockRedirectSelfTest {
                         networkSettingsBatch.packets().get(0)),
                 "redirect NetworkSettings differs from verified encoder");
 
-        session.accept(BedrockBatchCodec.encodeSingle(new byte[] {0x01}, true, true));
+        session.accept(BedrockBatchCodec.encodeSingle(loginPacket(2168, "signed-connection-request"), true, true));
         require(session.stage() == BedrockRedirectSession.Stage.LOGIN_ACCEPTED,
                 "redirect did not advance on Login");
         var loginReply = BedrockBatchCodec.decode(sent.get(1), true).orElseThrow();
@@ -80,16 +93,25 @@ final class BedrockRedirectSelfTest {
         };
     }
 
+    private static byte[] loginPacket(int protocol, String connectionRequest) {
+        byte[] request = connectionRequest.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        if (request.length >= 128) throw new IllegalArgumentException("test request too long");
+        byte[] packet = new byte[1 + 4 + 1 + request.length];
+        packet[0] = 0x01;
+        packet[1] = (byte) (protocol >>> 24);
+        packet[2] = (byte) (protocol >>> 16);
+        packet[3] = (byte) (protocol >>> 8);
+        packet[4] = (byte) protocol;
+        packet[5] = (byte) request.length;
+        System.arraycopy(request, 0, packet, 6, request.length);
+        return packet;
+    }
+
     private static byte[] resourcePackResponse(int status, String type) {
         byte[] text = type.getBytes(java.nio.charset.StandardCharsets.UTF_8);
-        byte[] packet = new byte[2 + text.length];
-        packet[0] = 0x08;
-        packet[1] = (byte) status;
-        // The v2168 packet also carries a status-string field. The redirect
-        // only needs the status value, but tests include the real field shape.
-        byte[] full = new byte[packet.length + 1];
-        full[0] = packet[0];
-        full[1] = packet[1];
+        byte[] full = new byte[3 + text.length];
+        full[0] = 0x08;
+        full[1] = (byte) status;
         full[2] = (byte) text.length;
         System.arraycopy(text, 0, full, 3, text.length);
         return full;
