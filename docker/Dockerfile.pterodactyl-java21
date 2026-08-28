@@ -15,7 +15,7 @@ RUN apt-get update \
         libxcomposite1 \
         libxtst6 \
         libnss3 \
-        libasound2 \
+        libasound2t64 \
         libgbm1 \
         libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
