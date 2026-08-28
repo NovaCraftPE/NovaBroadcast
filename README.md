@@ -7,16 +7,16 @@ Current milestone:
 - Java 21 standalone application
 - Microsoft device-code sign-in and refresh-token cache
 - Xbox User Token / XSTS exchange and profile lookup
-- clean MPSD preflight and guarded session lifecycle
-- authenticated MPSD activity discovery, offline candidate extraction, and activity-handle binding
+- clean MPSD preflight, guarded session publication, activity binding, and shutdown cleanup
+- authenticated MPSD activity discovery, offline candidate extraction, automatic consecutive-capture diffing
 - NetherNet HTTP signaling (`GET /v1/join`, `POST /v1/join/{networkId}`)
 - native answering-side WebRTC via Apache-2.0 `webrtc-java`
 - persistent P-384 NetherNet operator identity and signed server `a=identity`
 - Minecraft client GameServerToken/fingerprint-proof verification through OpenID discovery
-- protocol-2168 Bedrock batch framing and redirect-only handshake
+- verified Bedrock protocol 2168 and 2169 redirect-only handshakes
 - guarded automatic `TransferPacket` to the configured target after resource-pack completion
 - explicit MPSD custom-property file support without guessed Minecraft-owned keys
-- Java 21 CI, protocol/identity/redirect/import self-tests, native WebRTC smoke test, and tested JAR artifact
+- Java 21 CI, protocol/identity/redirect/import/diff self-tests, native WebRTC smoke test, and tested JAR artifact
 
 ## Build and test
 
@@ -50,11 +50,11 @@ For the complete discovery + offline extraction flow:
 
     java -jar NovaBroadcast.jar --discover-session
 
-This first performs the authenticated activity query, stores the raw response at:
+This performs the authenticated activity query, stores the raw response at:
 
     data/mpsd-activities.json
 
-and then prepares each complete `sessionRef` under:
+and prepares each complete `sessionRef` under:
 
     data/activity-import/candidate-N/
 
@@ -73,28 +73,55 @@ paths to extracted custom-property JSON. It always keeps:
 so discovery cannot accidentally publish or replace the account's current Xbox
 activity.
 
-The two stages can also be run independently:
+When a previous capture already exists, NovaBroadcast automatically rotates it to:
+
+    data/mpsd-activities-previous.json
+
+and, for `--discover-session`, automatically compares the two account-owned
+captures and writes:
+
+    data/activity-diff.txt
+
+The diff matches activities by title ID + SCID + template rather than array
+position, so reordered query results do not create false changes. Changed paths
+are grouped as `CUSTOM`, `SESSION_REF`, `SYSTEM`, or `OTHER` to make host/session
+specific values easier to identify.
+
+The stages can also be run independently:
 
     java -jar NovaBroadcast.jar --dump-activities
     java -jar NovaBroadcast.jar --prepare-activity-import
+    java -jar NovaBroadcast.jar --diff-last-activities
+    java -jar NovaBroadcast.jar --diff-activities before.json after.json
 
-A useful test is to start or join a normal Minecraft Bedrock multiplayer activity
-on the same Microsoft/Xbox account immediately before running `--discover-session`.
+A useful clean-room test is:
+
+1. Start or join one normal Minecraft Bedrock multiplayer activity on the same
+   Microsoft/Xbox account and run `--discover-session`.
+2. Start or join another normal Minecraft multiplayer activity and run the same
+   command again.
+3. Inspect `data/activity-diff.txt` and the generated candidate directories.
 
 **Important:** captured custom properties are reference data, not automatically
 publication-ready. Title/session fields can contain values tied to the original
 live Minecraft host or activity. NovaBroadcast deliberately does not infer which
-private title fields should be replaced. Compare/inspect the captured candidate
-before enabling a write; the main configuration is never modified by discovery.
+private title fields should be replaced. The main configuration is never modified
+by discovery and live publication remains opt-in.
 
 ## Bedrock redirect bootstrap
 
 The redirect path is intentionally narrow rather than a general Bedrock server.
-It currently targets the explicitly tested protocol-2168 family:
+The currently verified stable versions are:
 
-- 1.26.40
-- 1.26.43
-- 1.26.44
+- 1.26.40 -> protocol 2168
+- 1.26.43 -> protocol 2168
+- 1.26.44 -> protocol 2168
+- 1.26.45 -> protocol 2169
+
+The 1.26.45 mapping is based on Mojang's tagged protocol schemas for the exact
+redirect path used here: RequestNetworkSettings, NetworkSettings, Login,
+ResourcePacksInfo, ResourcePackStack, ResourcePackClientResponse and Transfer.
+NovaBroadcast does not assume compatibility for other protocol versions.
 
 Example:
 
@@ -185,6 +212,11 @@ standard Xbox MPSD `activity` handle write referencing the same SCID/template/
 session name. This binds the published session as the signed-in user's current
 join-in-progress/social activity. It is separately opt-in because setting a new
 activity replaces the account's previous bound activity.
+
+When NovaBroadcast shuts down after publishing a live session, it removes its
+active MPSD member. MPSD then clears the member's bound activity handle as part
+of the normal session lifecycle, avoiding a stale joinable activity after the
+NetherNet/WebRTC host has stopped.
 
 ## Minecraft client authentication
 
