@@ -8,6 +8,9 @@ record AppConfig(
         String clientId,
         String clientSecret,
         String redirectUri,
+        String microsoftCallbackListenHost,
+        int microsoftCallbackListenPort,
+        int microsoftCallbackTimeoutSeconds,
         String scope,
         String tenant,
         String xboxRelyingParty,
@@ -52,6 +55,9 @@ record AppConfig(
                 p.getProperty("microsoft.clientId", "").trim(),
                 p.getProperty("microsoft.clientSecret", "").trim(),
                 p.getProperty("microsoft.redirectUri", "").trim(),
+                p.getProperty("microsoft.callbackListenHost", "0.0.0.0").trim(),
+                parsePort(p, "microsoft.callbackListenPort", 53682),
+                parsePositive(p, "microsoft.callbackTimeoutSeconds", 300),
                 normalizeMicrosoftScope(p.getProperty("microsoft.scope", "xboxlive.signin xboxlive.offline_access")),
                 p.getProperty("microsoft.tenant", "consumers").trim(),
                 p.getProperty("xbox.relyingParty", "http://xboxlive.com").trim(),
@@ -117,10 +123,14 @@ final class DefaultConfig {
     static final String TEXT = """
 # NovaBroadcast clean-room configuration
 # Xbox website sign-in uses Microsoft's documented authorization-code flow.
-# Register the redirect URI on the Entra app and create a client secret.
+# microsoft.redirectUri must be the public HTTPS callback registered on the Entra app.
+# Point that URL through your reverse proxy to callbackListenHost:callbackListenPort.
 microsoft.clientId=
 microsoft.clientSecret=
 microsoft.redirectUri=
+microsoft.callbackListenHost=0.0.0.0
+microsoft.callbackListenPort=53682
+microsoft.callbackTimeoutSeconds=300
 microsoft.scope=xboxlive.signin xboxlive.offline_access
 microsoft.tenant=consumers
 xbox.relyingParty=http://xboxlive.com
