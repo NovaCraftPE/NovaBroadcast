@@ -5,7 +5,10 @@ import java.nio.charset.StandardCharsets;
 import java.util.Map;
 
 final class XboxAuth {
-    XboxIdentity authenticate(String microsoftAccessToken, String relyingParty) throws Exception {
+    XboxIdentity authenticate(String microsoftAccessToken, String relyingParty, String sandboxId) throws Exception {
+        if (sandboxId == null || sandboxId.isBlank()) {
+            throw new IllegalArgumentException("Xbox sandbox ID must not be blank.");
+        }
         String userBody = """
 {"Properties":{"AuthMethod":"RPS","SiteName":"user.auth.xboxlive.com","RpsTicket":%s},"RelyingParty":"http://auth.xboxlive.com","TokenType":"JWT"}
 """.formatted(Json.quote("d=" + microsoftAccessToken));
@@ -23,8 +26,8 @@ final class XboxAuth {
         }
 
         String xstsBody = """
-{"Properties":{"SandboxId":"RETAIL","UserTokens":[%s]},"RelyingParty":%s,"TokenType":"JWT"}
-""".formatted(Json.quote(userToken), Json.quote(relyingParty));
+{"Properties":{"SandboxId":%s,"UserTokens":[%s]},"RelyingParty":%s,"TokenType":"JWT"}
+""".formatted(Json.quote(sandboxId), Json.quote(userToken), Json.quote(relyingParty));
 
         Http.Response xr = Http.post(
                 "https://xsts.auth.xboxlive.com/xsts/authorize",
