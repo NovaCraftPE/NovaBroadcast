@@ -1,0 +1,42 @@
+{
+  "_comment": "DO NOT EDIT: FILE GENERATED FOR PTERODACTYL PANEL IMPORT",
+  "meta": {
+    "version": "PTDL_v2",
+    "update_url": null
+  },
+  "exported_at": "2026-08-28T22:25:00+01:00",
+  "name": "NovaBroadcast",
+  "author": "NovaCraftPE",
+  "description": "NovaBroadcast Java 21 runtime with the WebRTC/PulseAudio dependency required for NetherNet signaling.",
+  "features": null,
+  "docker_images": {
+    "NovaBroadcast Java 21 (WebRTC)": "ghcr.io/novacraftpe/novabroadcast-java21:develop"
+  },
+  "file_denylist": [],
+  "startup": "java --enable-native-access=ALL-UNNAMED -Xms128M -Xmx{{SERVER_MEMORY}}M -jar {{SERVER_JARFILE}}",
+  "config": {
+    "files": "{}",
+    "startup": "{\"done\": []}",
+    "logs": "{}",
+    "stop": "^^C"
+  },
+  "scripts": {
+    "installation": {
+      "script": "#!/bin/bash\nset -e\ncd /mnt/server\nJAR_URL=\"https://github.com/NovaCraftPE/NovaBroadcast/releases/download/development-latest/NovaBroadcast.jar\"\necho \"Downloading NovaBroadcast.jar...\"\ncurl -fL --retry 3 -o NovaBroadcast.jar \"$JAR_URL\"\necho \"NovaBroadcast.jar installed.\"\nif [ ! -f config.properties ]; then\n  cat > config.properties <<'EOF'\ntarget.host=54.37.245.44\ntarget.port=19133\ntarget.name=Join To Open Server List\nbedrock.gameVersion=1.26.40\nsession.writeEnabled=false\nEOF\nfi\n",
+      "container": "ghcr.io/parkervcp/installers:debian",
+      "entrypoint": "bash"
+    }
+  },
+  "variables": [
+    {
+      "name": "Server JAR File",
+      "description": "The NovaBroadcast JAR file to run.",
+      "env_variable": "SERVER_JARFILE",
+      "default_value": "NovaBroadcast.jar",
+      "user_viewable": true,
+      "user_editable": true,
+      "rules": "required|string|max:64",
+      "field_type": "text"
+    }
+  ]
+}
