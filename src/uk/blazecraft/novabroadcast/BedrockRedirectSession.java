@@ -74,7 +74,6 @@ final class BedrockRedirectSession {
                 return;
             }
 
-            // NetworkSettings itself is sent using the pre-negotiation batch shape.
             sendPacket(BedrockRedirectProtocol.networkSettingsNone(), false);
             compressionNegotiated = true;
             stage = Stage.NETWORK_SETTINGS_SENT;
@@ -85,11 +84,23 @@ final class BedrockRedirectSession {
         if (!enabled || protocolVersion != configuredProtocol) return;
 
         if (packetId == BedrockRedirectProtocol.LOGIN && stage == Stage.NETWORK_SETTINGS_SENT) {
+            BedrockRedirectProtocol.LoginInfo login = BedrockRedirectProtocol.loginInfo(packet);
+            if (login == null) {
+                System.err.println("[Bedrock] Ignoring malformed Login packet");
+                return;
+            }
+            if (login.protocolVersion() != configuredProtocol) {
+                System.err.println("[Bedrock] Login protocol changed from negotiated " + configuredProtocol +
+                        " to " + login.protocolVersion() + "; refusing redirect bootstrap");
+                return;
+            }
+
             sendPackets(List.of(
                     BedrockRedirectProtocol.playStatusLoginSuccess(),
                     BedrockRedirectProtocol.emptyResourcePacksInfo()), true);
             stage = Stage.LOGIN_ACCEPTED;
-            System.out.println("[Bedrock] Login received; redirect-only resource-pack negotiation started");
+            System.out.println("[Bedrock] Login envelope accepted (connectionRequest=" +
+                    login.connectionRequestBytes() + " bytes); redirect-only resource-pack negotiation started");
             return;
         }
 
