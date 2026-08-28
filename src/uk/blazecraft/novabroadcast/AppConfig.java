@@ -14,6 +14,7 @@ record AppConfig(
         String targetName,
         boolean sessionEnabled,
         boolean sessionWriteEnabled,
+        boolean sessionSetActivity,
         boolean netherNetEnabled,
         String sessionScid,
         String sessionTemplate,
@@ -55,6 +56,7 @@ record AppConfig(
                 p.getProperty("target.name", "NovaCraft").trim(),
                 Boolean.parseBoolean(p.getProperty("session.enabled", "false")),
                 Boolean.parseBoolean(p.getProperty("session.writeEnabled", "false")),
+                Boolean.parseBoolean(p.getProperty("session.setActivity", "false")),
                 Boolean.parseBoolean(p.getProperty("nethernet.enabled", "false")),
                 p.getProperty("session.scid", "").trim(),
                 p.getProperty("session.template", "").trim(),
@@ -120,6 +122,9 @@ session.scid=
 session.template=
 session.name=NovaBroadcast
 session.writeEnabled=false
+# When true, a successful live publication is also bound as the signed-in
+# account's Xbox activity handle (join-in-progress/social activity).
+session.setActivity=false
 
 # Optional title-authorized JSON objects. NovaBroadcast never guesses Minecraft
 # custom property names. Supply these only from your legitimate title/session
