@@ -37,6 +37,9 @@ jobs:
       - name: Self-test
         run: java -jar NovaBroadcast.jar --self-test
 
+      - name: Config preflight
+        run: java -jar NovaBroadcast.jar --config-check
+
       - name: Native WebRTC smoke test
         run: java -jar NovaBroadcast.jar --webrtc-smoke-test
 
