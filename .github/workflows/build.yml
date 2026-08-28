@@ -9,6 +9,12 @@ on:
 permissions:
   contents: write
 
+# A newer push to the same branch supersedes an older build. This prevents two
+# successful push runs from racing to replace the development-latest release.
+concurrency:
+  group: novabroadcast-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -56,6 +62,15 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # Fail closed if another commit reached this branch while this run was
+          # executing. Only the current branch head may replace development-latest.
+          git fetch origin "$GITHUB_REF_NAME"
+          CURRENT_HEAD="$(git rev-parse "origin/$GITHUB_REF_NAME")"
+          if [ "$CURRENT_HEAD" != "$GITHUB_SHA" ]; then
+            echo "Skipping development release: $GITHUB_SHA is stale; branch head is $CURRENT_HEAD"
+            exit 0
+          fi
+
           gh release delete development-latest --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes 2>/dev/null || true
           git tag -f development-latest "$GITHUB_SHA"
           git push origin refs/tags/development-latest --force
