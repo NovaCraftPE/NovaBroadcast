@@ -23,17 +23,7 @@ public final class NovaBroadcast {
                 return;
             }
             if (Arrays.asList(args).contains("--prepare-activity-import")) {
-                Path dump = Path.of("data/mpsd-activities.json");
-                Path output = Path.of("data/activity-import");
-                List<Path> candidates = ActivityImport.prepare(dump, output);
-                System.out.println("[ActivityImport] Prepared " + candidates.size() + " candidate(s) under " + output.toAbsolutePath());
-                for (Path candidate : candidates) {
-                    System.out.println("[ActivityImport] " + candidate.resolve("session.properties").toAbsolutePath());
-                }
-                if (candidates.isEmpty()) {
-                    System.out.println("[ActivityImport] No complete sessionRef candidates were present in the dump.");
-                }
-                System.out.println("[ActivityImport] Main config was not modified and publishing remains disabled.");
+                prepareActivityImport();
                 return;
             }
 
@@ -59,10 +49,11 @@ public final class NovaBroadcast {
             if (!xbox.gamertag().isBlank()) System.out.println("[Xbox] Gamertag: " + xbox.gamertag());
             if (!xbox.xuid().isBlank()) System.out.println("[Xbox] XUID: " + xbox.xuid());
 
-            if (Arrays.asList(args).contains("--dump-activities")) {
+            if (Arrays.asList(args).contains("--dump-activities") || Arrays.asList(args).contains("--discover-session")) {
                 SessionDirectoryClient sessions = new SessionDirectoryClient(xbox);
                 sessions.dumpOwnActivities(Path.of("data/mpsd-activities.json"));
                 System.out.println("[NovaBroadcast] Activity discovery complete. No session was created or modified.");
+                if (Arrays.asList(args).contains("--discover-session")) prepareActivityImport();
                 return;
             }
 
@@ -93,5 +84,19 @@ public final class NovaBroadcast {
             if (Boolean.getBoolean("novabroadcast.debug")) e.printStackTrace();
             System.exit(1);
         }
+    }
+
+    private static void prepareActivityImport() throws Exception {
+        Path dump = Path.of("data/mpsd-activities.json");
+        Path output = Path.of("data/activity-import");
+        List<Path> candidates = ActivityImport.prepare(dump, output);
+        System.out.println("[ActivityImport] Prepared " + candidates.size() + " candidate(s) under " + output.toAbsolutePath());
+        for (Path candidate : candidates) {
+            System.out.println("[ActivityImport] " + candidate.resolve("session.properties").toAbsolutePath());
+        }
+        if (candidates.isEmpty()) {
+            System.out.println("[ActivityImport] No complete sessionRef candidates were present in the dump.");
+        }
+        System.out.println("[ActivityImport] Main config was not modified and publishing remains disabled.");
     }
 }
