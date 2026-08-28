@@ -4,7 +4,6 @@ import java.io.ByteArrayOutputStream;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
-import java.util.*;
 
 /**
  * Minimal protocol-2168 packet codec used only to reach a safe redirect point.
@@ -19,20 +18,19 @@ final class BedrockRedirectProtocol {
     static final int RESOURCE_PACK_STACK = 7;
     static final int RESOURCE_PACK_CLIENT_RESPONSE = 8;
     static final int TRANSFER = 85;
-    static final int REQUEST_NETWORK_SETTINGS = 193;
     static final int NETWORK_SETTINGS = 143;
+    static final int REQUEST_NETWORK_SETTINGS = 193;
 
-    static final int PACK_STATUS_HAVE_ALL_PACKS = 2; // protocol-2168 wire value
-    static final int PACK_STATUS_COMPLETED = 3;      // protocol-2168 wire value
+    // Since protocol 2168 the response wire value is Status.ordinal()-1:
+    // REFUSED=0, SEND_PACKS=1, HAVE_ALL_PACKS=2, COMPLETED=3.
+    static final int PACK_STATUS_HAVE_ALL_PACKS = 2;
+    static final int PACK_STATUS_COMPLETED = 3;
 
     static byte[] networkSettingsNone() {
-        ByteArrayOutputStream out = packetHeader(NETWORK_SETTINGS);
-        writeShortLE(out, 0);          // compression threshold
-        writeShortLE(out, 0xffff);     // Compression::None
-        out.write(0);                  // client throttling disabled
-        out.write(0);                  // throttle threshold
-        writeFloatLE(out, 0.0f);       // throttle scalar
-        return out.toByteArray();
+        // Keep this shared with the exact-byte-tested NetworkSettings encoder.
+        // PacketCompressionAlgorithm::None is enum value 2 on current Bedrock,
+        // not the compression batch method marker 0xff.
+        return BedrockNetworkSettingsEncoder.encodeNoCompression();
     }
 
     static byte[] playStatusLoginSuccess() {
@@ -48,7 +46,7 @@ final class BedrockRedirectProtocol {
         out.write(0); // scripting enabled
         out.write(0); // vibrant visuals force disabled
         out.writeBytes(new byte[16]); // zero UUID world template
-        BedrockBatchCodec.writeVarUInt(out, 0); // empty template version
+        BedrockBatchCodec.writeVarUInt(out, 0); // empty template version string
         BedrockBatchCodec.writeVarUInt(out, 0); // no resource packs
         return out.toByteArray();
     }
@@ -56,11 +54,11 @@ final class BedrockRedirectProtocol {
     static byte[] emptyResourcePackStack(String gameVersion) {
         ByteArrayOutputStream out = packetHeader(RESOURCE_PACK_STACK);
         out.write(0); // forced to accept
-        BedrockBatchCodec.writeVarUInt(out, 0); // no packs
+        BedrockBatchCodec.writeVarUInt(out, 0); // no behavior packs
+        BedrockBatchCodec.writeVarUInt(out, 0); // no resource packs
         writeString(out, gameVersion);
         BedrockBatchCodec.writeVarUInt(out, 0); // no experiments
         out.write(0); // experiments previously toggled
-        out.write(0); // has editor packs
         return out.toByteArray();
     }
 
@@ -106,24 +104,11 @@ final class BedrockRedirectProtocol {
         out.writeBytes(bytes);
     }
 
-    private static void writeShortLE(ByteArrayOutputStream out, int value) {
-        out.write(value & 0xff);
-        out.write((value >>> 8) & 0xff);
-    }
-
     private static void writeIntBE(ByteArrayOutputStream out, int value) {
         out.write((value >>> 24) & 0xff);
         out.write((value >>> 16) & 0xff);
         out.write((value >>> 8) & 0xff);
         out.write(value & 0xff);
-    }
-
-    private static void writeFloatLE(ByteArrayOutputStream out, float value) {
-        int bits = Float.floatToRawIntBits(value);
-        out.write(bits & 0xff);
-        out.write((bits >>> 8) & 0xff);
-        out.write((bits >>> 16) & 0xff);
-        out.write((bits >>> 24) & 0xff);
     }
 
     private record Header(int packetId, int bytes) {}
